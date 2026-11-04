@@ -1,0 +1,10 @@
+{
+  "id": "paipa-gallery",
+  "name": "Paipa Gallery",
+  "version": "1.3.0",
+  "minAppVersion": "1.5.0",
+  "description": "Interactive image and video blocks with numbered figures, captions, in-text figure references, thumbnail reordering, and full-size preview.",
+  "author": "paipa",
+  "authorUrl": "https://github.com/Paipa03",
+  "isDesktopOnly": false
+}
