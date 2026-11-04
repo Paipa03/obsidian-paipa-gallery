@@ -1,36 +1,64 @@
 # Paipa Gallery
 
-Lightweight interactive media blocks for images and videos, styled only with the theme's own variables. UI inspired by Lite Gallery.
+**Put a whole set of photos or videos into one tidy, swipeable block instead of a long column of images.**
 
-## Create
+![A gallery block with a main image, caption and thumbnail strip](https://raw.githubusercontent.com/Paipa03/obsidian-paipa-gallery/main/docs/demo.png)
 
-- Select some image / video links, right-click → **Gallery**, or run **Create gallery**. With no selection an empty gallery is inserted.
-- **Convert Lite Gallery at cursor** turns a `litegal` code block into a gallery.
-- Data lives in a `gallery-view` code block (JSON). Without the plugin it is just a code block.
+## Is this for you?
 
-## Browse and arrange
+- You drop ten trip photos into a note and suddenly have to scroll forever.
+- You write reports, papers or project logs and want **Figure 1, Figure 2…** with captions, and references in your text that jump to the right image.
+- You want to reorder images by dragging thumbnails, not by moving `![[...]]` lines around.
+- Your vault has big camera photos and pages with images feel sluggish.
 
-- Arrow buttons / arrow keys switch items; click the main image to open the original.
-- Drag thumbnails to reorder, drag them out into the note, or drag images from the note (or from your file manager) into the gallery.
-- Right-click a thumbnail: **Insert reference**, **Remove image / video**.
-- Mobile: tap to select, long-press to lift and drag.
+## What you get
 
-## Figures and references
+- **One block, many images and videos**: arrows / arrow keys to browse, click the main image to open the original.
+- **Thumbnails you can drag** to reorder. Drag a thumbnail out to place it in the note, or drag an image from the note or your file manager into the gallery.
+- **Figures and captions**: every item is numbered (`Figure N`). Double-click to write a caption; numbering follows the order automatically.
+- **Figure references**: right-click a thumbnail → **Insert reference** puts a small button in your text that scrolls to that figure.
+- **Video player**: play / pause, seek, volume, playback speed.
+- **Fast with large photos**: thumbnails and the main view use small copies made on the fly; the full file loads only when you open it.
 
-- Each item shows `Figure N` under the main image. Double-click it to add a caption; the caption moves with the item and numbering follows the order.
-- **Insert reference** puts a figure reference in the text; clicking it jumps to that item.
+## Quick start
 
-## Performance
+1. Select a few image or video links in a note.
+2. Right-click → **Gallery** (or run **Create gallery**).
+3. That's it. Drag thumbnails to reorder, double-click `Figure 1` to add a caption.
 
-Thumbnails (192 px) and the main view (2048 px) use downscaled copies generated on demand and decoded once per session; the original file is loaded only when you open it. SVG and GIF are shown as-is.
+Coming from Lite Gallery? Put the cursor in a `litegal` block and run **Convert Lite Gallery at cursor**.
+
+## Your data
+
+A gallery is a fenced code block with a small JSON list of your images:
+
+````markdown
+```gallery-view
+{"v":1,"id":"gal-hike","images":[{"id":"a","link":"![[ridge.jpg]]","caption":"Sunset ridge"}]}
+```
+````
+
+Your images stay normal files in your vault. Without the plugin you see the code block, and the files are untouched.
+
+## Works on
+
+Windows, macOS, Linux, iPhone / iPad and Android. On touch screens, tap a thumbnail to select it and long-press to drag.
+
+## Works well with
+
+All optional.
+
+- [Editor Enhancer](https://github.com/Paipa03/obsidian-editor-enhancer): drag the whole gallery like any other block.
+- [Section Blocks](https://github.com/Paipa03/obsidian-section-blocks): files dropped into a gallery are saved in a `<note name> media` folder next to the note. Without it, Obsidian's own attachment setting decides where they go.
+
+## Notes
+
+- Some tooltips and messages are currently in Chinese.
+- UI inspired by Lite Gallery.
 
 ## Install
 
-Settings → Community plugins → Browse → search **Paipa Gallery**.
-
-Manual: download `main.js`, `manifest.json` and `styles.css` from the latest release into `<vault>/.obsidian/plugins/paipa-gallery/`.
-
-Optional companions: Editor Enhancer (block drag), Section Blocks (puts dropped files into a `<note> media` folder).
+**Settings → Community plugins → Browse**, search **Paipa Gallery**, then Install and Enable.
 
 ## License
 

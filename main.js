@@ -1,4 +1,10 @@
-/* Paipa Gallery 1.3.0 · paipa (formerly Gallery View, id gallery-view) · UI inspired by Lite Gallery. Source: this file (plugin.js / core.js sources retired). */
+/*
+ * Paipa Gallery 1.3.1 - by paipa, MIT License
+ * https://github.com/Paipa03/obsidian-paipa-gallery
+ *
+ * UI inspired by the Lite Gallery plugin.
+ */
+
 "use strict";
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
