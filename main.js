@@ -1,11 +1,91 @@
 /*
- * Paipa Gallery 1.3.1 - by paipa, MIT License
+ * Paipa Gallery 1.4.0 - by paipa, MIT License
  * https://github.com/Paipa03/obsidian-paipa-gallery
  *
  * UI inspired by the Lite Gallery plugin.
  */
 
 "use strict";
+// ---- i18n ----
+// UI text only. Keys are the English strings; values are Simplified Chinese.
+// Never used for document syntax (gallery-view JSON, gv-ref tokens, "Figure N" written into notes).
+var PAIPA_I18N_ZH = {
+  "Language": "语言",
+  "Follow Obsidian's language, or choose one for this plugin.": "跟随 Obsidian 的语言，或为本插件单独选择。",
+  "Follow Obsidian": "跟随 Obsidian",
+  "Close original image": "关闭原图",
+  "Gallery": "Gallery",
+  "Previous": "上一张",
+  "Next": "下一张",
+  "View original image": "查看原图",
+  "Drop images or videos here": "拖入图片或视频",
+  "Double-click to add a title": "双击添加标题",
+  "Double-click to name this figure": "双击为此图命名",
+  "Figure": "图",
+  "Figure {n}": "图 {n}",
+  "Media list": "媒体列表",
+  "Image can't be loaded": "图片无法读取",
+  "Insert reference": "插入引用",
+  "Remove video": "移除视频",
+  "Remove image": "移除图片",
+  "Couldn't add media: {error}": "无法加入媒体：{error}",
+  "Video": "视频",
+  "Play": "播放",
+  "Pause": "暂停",
+  "Play / pause": "播放 / 暂停",
+  "Progress": "进度",
+  "Mute": "静音",
+  "Unmute": "取消静音",
+  "Volume": "音量",
+  "Playback speed": "播放速度",
+  "Video can't be loaded": "视频无法读取",
+  "Item {n} of {total}": "第 {n} 张，共 {total} 张",
+  "Empty gallery": "空 Gallery",
+  "Can't read the gallery data. Check the source.": "Gallery 数据无法读取；请检查源代码。",
+  "Create gallery": "创建 Gallery",
+  "Convert Lite Gallery at cursor": "转换光标处的 Lite Gallery",
+  "Image": "图片",
+  "Place the cursor inside a Lite Gallery code block.": "请把光标放在 Lite Gallery 源码块中。",
+  "Some images weren't recognized. The original gallery was kept.": "有无法识别的图片，原 Gallery 已保留。",
+  "Reference to {label} added at the end of the text. Drag it anywhere.": "{label} 的引用已加到正文末尾，可拖到任意位置。",
+  "Figure not found. It may have been deleted.": "找不到这张图，它可能已被删除。",
+  "Can't find the gallery that contains this figure.": "找不到这张图所在的 Gallery。",
+  "Figure not found": "找不到此图",
+  "Show {label} \xB7 drag to move": "跳转到{label} \xB7 拖动可移动",
+  "Show {label}": "跳转到{label}",
+  "The content changed. Move canceled.": "内容已变化，移动已取消。",
+  "A reference can only be placed within its own gallery's section.": "引用只能放在它所属 Gallery 的区域内。",
+  "Move images within the same editor.": "请在同一编辑器中移动图片。",
+  "The editor changed. Drop again; imported attachments stay in the vault.": "编辑器已变化，请重新拖入；导入的附件仍保留在库中。",
+  "Developer mode": "开发者模式",
+  "Show fine-tuning controls.": "显示微调选项。",
+  "Figure label vertical offset": "图引用文字垂直偏移",
+  "Nudges the text inside figure reference buttons. Positive moves it down. Unit: px.": "微调图引用按钮内文字的上下位置。正值向下移。单位：px。",
+  "Reset": "重置"
+};
+var paipaLang = "auto";
+function paipaObsidianLang() {
+  try {
+    const o = require("obsidian");
+    const l = (typeof o.getLanguage === "function" && o.getLanguage()) || window.localStorage.getItem("language") || "en";
+    return /^zh/i.test(String(l)) ? "zh" : "en";
+  } catch (e) {
+    return "en";
+  }
+}
+function t(en, vars) {
+  const lang = paipaLang === "auto" ? paipaObsidianLang() : paipaLang;
+  let text = lang === "zh" && Object.prototype.hasOwnProperty.call(PAIPA_I18N_ZH, en) ? PAIPA_I18N_ZH[en] : en;
+  if (vars) text = text.replace(/\{(\w+)\}/g, (m, k) => Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : m);
+  return text;
+}
+// On-screen form of a figure label. The note keeps "Figure N"; only the display is translated.
+function figureText(label) {
+  const m = /^Figure (\d+)$/.exec(String(label));
+  if (m) return t("Figure {n}", { n: m[1] });
+  return label === "Figure" ? t("Figure") : label;
+}
+// ---- end i18n ----
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   try {
@@ -205,7 +285,7 @@ var require_core = __commonJS({
 // plugin.js
 var obsidian = require("obsidian");
 var { Plugin, MarkdownRenderChild, Menu, Modal, Notice, setIcon, editorInfoField, editorLivePreviewField, PluginSettingTab, Setting } = obsidian;
-var DEFAULT_SETTINGS = { devMode: false, refOffset: -2 };
+var DEFAULT_SETTINGS = { devMode: false, refOffset: -2, language: "auto" };
 var { EditorState, StateField, StateEffect, Annotation, Transaction, Prec, ChangeSet } = require("@codemirror/state");
 var { EditorView, WidgetType, Decoration } = require("@codemirror/view");
 var core = require_core();
@@ -245,7 +325,7 @@ var OriginalImageModal = class extends Modal {
     this.modalEl.classList.add("gv-modal");
     this.modalEl.setAttribute("aria-label", this.label);
     const close = this.modalEl.querySelector(".modal-close-button, .modal-header-button");
-    close?.setAttribute("aria-label", "关闭原图");
+    close?.setAttribute("aria-label", t("Close original image"));
     const img = make(this.contentEl.ownerDocument, "img", "gv-original", this.contentEl);
     img.src = this.src;
     img.alt = this.label;
@@ -320,34 +400,34 @@ var GalleryUI = class {
     this.root.galleryUI = this;
     this.root.contentEditable = "false";
     this.frame = make(this.doc, "section", "gv", this.root);
-    this.frame.setAttribute("aria-label", "Gallery");
+    this.frame.setAttribute("aria-label", t("Gallery"));
     this.frame.setAttribute("role", "region");
     const stage = make(this.doc, "div", "gv-stage", this.frame);
-    this.previous = this.button(stage, "chevron-left", "上一张", () => this.navigate(-1));
+    this.previous = this.button(stage, "chevron-left", t("Previous"), () => this.navigate(-1));
     const center = make(this.doc, "div", "gv-center", stage);
     this.hero = make(this.doc, "button", "gv-hero", center);
     this.hero.type = "button";
-    this.hero.setAttribute("aria-label", "查看原图");
+    this.hero.setAttribute("aria-label", t("View original image"));
     this.heroImage = make(this.doc, "img", "gv-hero-image", this.hero);
     this.heroImage.draggable = false;
     this.heroImage.decoding = "async";
     this.empty = make(this.doc, "span", "gv-empty", this.hero);
     const emptyIcon = make(this.doc, "span", "gv-empty-icon", this.empty);
     setIcon(emptyIcon, "images");
-    make(this.doc, "span", "", this.empty).textContent = "拖入图片或视频";
+    make(this.doc, "span", "", this.empty).textContent = t("Drop images or videos here");
     this.buildPlayer(center);
-    this.next = this.button(stage, "chevron-right", "下一张", () => this.navigate(1));
+    this.next = this.button(stage, "chevron-right", t("Next"), () => this.navigate(1));
     this.captionRow = make(this.doc, "div", "gv-caption", this.frame);
     this.figure = make(this.doc, "span", "gv-figure", this.captionRow);
     this.captionText = make(this.doc, "span", "gv-caption-text", this.captionRow);
-    this.captionText.dataset.placeholder = cm ? "Double-click to add a title" : "";
-    tooltip(this.figure, cm ? "Double-click to name this figure" : "Figure");
+    this.captionText.dataset.placeholder = cm ? t("Double-click to add a title") : "";
+    tooltip(this.figure, cm ? t("Double-click to name this figure") : t("Figure"));
     this.status = make(this.doc, "span", "gv-sr-only", this.frame);
     this.status.setAttribute("aria-live", "polite");
     this.strip = make(this.doc, "div", "gv-strip", this.frame);
     this.feedback = make(this.doc, "span", "gv-feedback", this.frame);
     this.feedback.setAttribute("aria-hidden", "true");
-    this.strip.setAttribute("aria-label", "媒体列表");
+    this.strip.setAttribute("aria-label", t("Media list"));
     this.strip.setAttribute("role", "list");
     this.hero.addEventListener("click", () => {
       const item = this.current();
@@ -356,7 +436,7 @@ var GalleryUI = class {
     this.hero.addEventListener("dragstart", stop);
     this.heroImage.addEventListener("error", () => {
       this.hero.classList.add("is-missing");
-      this.heroImage.alt = "图片无法读取";
+      this.heroImage.alt = t("Image can't be loaded");
     });
     this.captionRow.addEventListener("dblclick", (event) => {
       if (!this.cm) return;
@@ -395,8 +475,8 @@ var GalleryUI = class {
       const item = this.block.model.images.find((entry) => entry.id === itemId);
       const video = item && core.isVideo(item.link);
       const menu = new Menu();
-      menu.addItem((i) => i.setTitle("Insert reference").setIcon("link").onClick(() => this.plugin.createReference(this, itemId)));
-      menu.addItem((i) => i.setTitle(video ? "Remove video" : "Remove image").setIcon("trash-2").onClick(() => this.plugin.removeImage(this, itemId)));
+      menu.addItem((i) => i.setTitle(t("Insert reference")).setIcon("link").onClick(() => this.plugin.createReference(this, itemId)));
+      menu.addItem((i) => i.setTitle(video ? t("Remove video") : t("Remove image")).setIcon("trash-2").onClick(() => this.plugin.removeImage(this, itemId)));
       menu.showAtMouseEvent(event);
     });
     this.frame.addEventListener("dragover", (event) => {
@@ -411,7 +491,7 @@ var GalleryUI = class {
     this.frame.addEventListener("drop", (event) => {
       if (!this.cm || !plugin.acceptsDrop(event)) return;
       stop(event);
-      plugin.nativeDrop(this, event).catch((error) => new Notice("无法加入媒体：" + error.message));
+      plugin.nativeDrop(this, event).catch((error) => new Notice(t("Couldn't add media: {error}", { error: error.message })));
     });
     this.frame.addEventListener("keydown", (event) => {
       if (this.editing) return;
@@ -463,37 +543,37 @@ var GalleryUI = class {
     this.video.preload = "metadata";
     this.video.disablePictureInPicture = true;
     this.video.draggable = false;
-    this.video.setAttribute("aria-label", "视频");
+    this.video.setAttribute("aria-label", t("Video"));
     this.bigPlay = make(doc, "button", "gv-video-big", this.player);
     this.bigPlay.type = "button";
-    this.bigPlay.setAttribute("aria-label", "播放");
+    this.bigPlay.setAttribute("aria-label", t("Play"));
     setIcon(this.bigPlay, "play");
     const bar = make(doc, "div", "gv-video-bar", this.player);
     this.playButton = make(doc, "button", "gv-video-btn clickable-icon", bar);
     this.playButton.type = "button";
-    this.playButton.setAttribute("aria-label", "播放 / 暂停");
+    this.playButton.setAttribute("aria-label", t("Play / pause"));
     setIcon(this.playButton, "play");
     this.timeLabel = make(doc, "span", "gv-video-time", bar);
     this.timeLabel.textContent = "0:00 / 0:00";
     this.track = make(doc, "div", "gv-video-track", bar);
     this.track.setAttribute("role", "slider");
-    this.track.setAttribute("aria-label", "进度");
+    this.track.setAttribute("aria-label", t("Progress"));
     const rail = make(doc, "div", "gv-video-rail", this.track);
     this.fill = make(doc, "div", "gv-video-fill", rail);
     this.knob = make(doc, "div", "gv-video-knob", rail);
     this.muteButton = make(doc, "button", "gv-video-btn gv-video-mute clickable-icon", bar);
     this.muteButton.type = "button";
-    this.muteButton.setAttribute("aria-label", "静音");
+    this.muteButton.setAttribute("aria-label", t("Mute"));
     setIcon(this.muteButton, "volume-2");
     this.volumeTrack = make(doc, "div", "gv-video-track gv-video-volume", bar);
     this.volumeTrack.setAttribute("role", "slider");
-    this.volumeTrack.setAttribute("aria-label", "音量");
+    this.volumeTrack.setAttribute("aria-label", t("Volume"));
     const volumeRail = make(doc, "div", "gv-video-rail", this.volumeTrack);
     this.volumeFill = make(doc, "div", "gv-video-fill", volumeRail);
     this.volumeKnob = make(doc, "div", "gv-video-knob", volumeRail);
     this.speedButton = make(doc, "button", "gv-video-speed", bar);
     this.speedButton.type = "button";
-    this.speedButton.setAttribute("aria-label", "播放速度");
+    this.speedButton.setAttribute("aria-label", t("Playback speed"));
     this.speedButton.textContent = "1\xD7";
     this.video.addEventListener("click", (event) => {
       stop(event);
@@ -514,7 +594,7 @@ var GalleryUI = class {
 
     this.video.addEventListener("error", () => {
       this.player.classList.add("is-missing");
-      this.timeLabel.textContent = "视频无法读取";
+      this.timeLabel.textContent = t("Video can't be loaded");
     });
     this.track.addEventListener("pointerdown", (event) => {
       if (event.button !== 0 && event.pointerType === "mouse") return;
@@ -598,12 +678,12 @@ var GalleryUI = class {
     const playing = !this.video.paused && !this.video.ended;
     this.player.classList.toggle("is-playing", playing);
     setIcon(this.playButton, playing ? "pause" : "play");
-    this.bigPlay.setAttribute("aria-label", playing ? "暂停" : "播放");
+    this.bigPlay.setAttribute("aria-label", playing ? t("Pause") : t("Play"));
   }
   syncVolume() {
     const muted = this.video.muted || this.video.volume === 0, level = muted ? 0 : this.video.volume;
     setIcon(this.muteButton, muted ? "volume-x" : level < 0.5 ? "volume-1" : "volume-2");
-    this.muteButton.setAttribute("aria-label", muted ? "取消静音" : "静音");
+    this.muteButton.setAttribute("aria-label", muted ? t("Unmute") : t("Mute"));
     this.player.classList.toggle("is-muted", muted);
     this.volumeFill.style.width = level * 100 + "%";
     this.volumeKnob.style.left = level * 100 + "%";
@@ -652,7 +732,7 @@ var GalleryUI = class {
     const current = this.current();
     this.captionRow.hidden = !current;
     if (!current) return;
-    this.figure.textContent = core.figureLabel(this.block.model, current.id);
+    this.figure.textContent = figureText(core.figureLabel(this.block.model, current.id));
     if (this.editing && this.editing === current.id) return;
     if (this.editing) this.finishCaption(false);
     this.captionText.textContent = current.caption || "";
@@ -799,7 +879,7 @@ var GalleryUI = class {
     const index = current ? images.indexOf(current) : -1;
     this.previous.setAttribute("aria-disabled", String(index <= 0));
     this.next.setAttribute("aria-disabled", String(index >= images.length - 1));
-    this.status.textContent = current ? `第 ${index + 1} 张，共 ${images.length} 张` : "空 Gallery";
+    this.status.textContent = current ? t("Item {n} of {total}", { n: index + 1, total: images.length }) : t("Empty gallery");
     this.shownKey = shown;
     this.renderCaption();
     this.prefetchNeighbors(current);
@@ -868,6 +948,7 @@ var GalleryUI = class {
 var GalleryView = class extends Plugin {
   async onload() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    paipaLang = this.settings.language || "auto";
     this.addSettingTab(new GallerySettingTab(this.app, this));
     this.uis = /* @__PURE__ */ new Set();
     this.textCache = /* @__PURE__ */ new WeakMap();
@@ -896,7 +977,7 @@ var GalleryView = class extends Plugin {
       if (el.closest(".cm-editor")) return;
       const model = core.parse(source);
       if (!model) {
-        el.textContent = "Gallery 数据无法读取；请检查源代码。";
+        el.textContent = t("Can't read the gallery data. Check the source.");
         return;
       }
       const child = new MarkdownRenderChild(el);
@@ -920,10 +1001,10 @@ var GalleryView = class extends Plugin {
       }
     });
     this.registerEvent(this.app.workspace.on("editor-menu", (menu, editor) => {
-      menu.addItem((item) => item.setTitle("Gallery").setIcon("images").setSection("editor-enhancer").setDisabled(!this.canCreate(editor.cm)).onClick(() => this.createGallery(editor.cm)));
+      menu.addItem((item) => item.setTitle(t("Gallery")).setIcon("images").setSection("editor-enhancer").setDisabled(!this.canCreate(editor.cm)).onClick(() => this.createGallery(editor.cm)));
     }));
-    this.addCommand({ id: "create-gallery", name: "Create gallery", editorCallback: (editor) => this.createGallery(editor.cm) });
-    this.addCommand({ id: "convert-lite-gallery", name: "Convert Lite Gallery at cursor", editorCallback: (editor) => this.convertLite(editor.cm) });
+    this.addCommand({ id: "create-gallery", name: t("Create gallery"), editorCallback: (editor) => this.createGallery(editor.cm) });
+    this.addCommand({ id: "convert-lite-gallery", name: t("Convert Lite Gallery at cursor"), editorCallback: (editor) => this.convertLite(editor.cm) });
     this.registerEvent(this.app.workspace.on("nsb:engine-ready", () => this.refreshEditors()));
     this.registerEvent(this.app.workspace.on("layout-change", () => this.attachDocuments()));
     this.docs = /* @__PURE__ */ new WeakSet();
@@ -943,8 +1024,14 @@ var GalleryView = class extends Plugin {
     for (const d of new Set(docs)) d.body?.style.setProperty("--gv-ref-offset", value + "px");
   }
   async saveSettings() {
+    paipaLang = this.settings.language || "auto";
     await this.saveData(this.settings);
     this.applyRefOffset();
+  }
+  // After a language change: re-render figure references and the per-item text of open galleries.
+  refreshLanguage() {
+    this.refreshEditors();
+    for (const ui of this.uis) ui.updateCurrent();
   }
   onunload() {
     for (const entry of this.scaled.values()) for (const url of Object.values(entry.urls)) if (String(url).startsWith("blob:")) URL.revokeObjectURL(url);
@@ -1133,7 +1220,7 @@ var GalleryView = class extends Plugin {
       const block = blocks.find((b) => b.model.id === ref.galleryId);
       const label = block && core.figureLabel(block.model, ref.itemId);
       const key = ref.galleryId + "/" + ref.itemId;
-      ranges.push(Decoration.replace({ widget: new RefWidget(this, ref, label || ref.label || "Figure", !label, flash === key) }).range(ref.from, ref.to));
+      ranges.push(Decoration.replace({ widget: new RefWidget(this, ref, figureText(label || ref.label || "Figure"), !label, flash === key) }).range(ref.from, ref.to));
     }
     return Decoration.set(ranges, true);
   }
@@ -1163,7 +1250,7 @@ var GalleryView = class extends Plugin {
     return true;
   }
   label(link) {
-    return core.destination(link)?.split("/").pop() || "图片";
+    return core.destination(link)?.split("/").pop() || t("Image");
   }
   imagePath(link) {
     let path = core.destination(link);
@@ -1405,7 +1492,7 @@ var GalleryView = class extends Plugin {
     let start = line;
     while (start > 1 && !/^\s*```litegal\s*$/.test(doc.line(start).text)) start--;
     if (!/^\s*```litegal\s*$/.test(doc.line(start).text)) {
-      new Notice("请把光标放在 Lite Gallery 源码块中。");
+      new Notice(t("Place the cursor inside a Lite Gallery code block."));
       return;
     }
     let end = start + 1;
@@ -1417,7 +1504,7 @@ var GalleryView = class extends Plugin {
       if (!text) continue;
       const link = text.startsWith("!") ? text : text.startsWith("[[") ? "!" + text : /^https?:/.test(text) ? "![](" + text + ")" : "![[" + text + "]]";
       if (!core.imageMatches(link).length) {
-        new Notice("有无法识别的图片，原 Gallery 已保留。");
+        new Notice(t("Some images weren't recognized. The original gallery was kept."));
         return;
       }
       links.push(link);
@@ -1433,6 +1520,7 @@ var GalleryView = class extends Plugin {
   }
   // ---- figure references --------------------------------------------------
   refElement(doc, ref, label, missing, flash, cm, sourcePath = "") {
+    label = figureText(label);
     const wrap = make(doc, "span", "gv-ref-wrap");
     const el = make(doc, "span", "gv-ref", wrap);
     make(doc, "span", "gv-ref-text", el).textContent = label;
@@ -1441,7 +1529,7 @@ var GalleryView = class extends Plugin {
     el.dataset.item = ref.itemId;
     el.classList.toggle("is-missing", missing);
     if (flash) el.classList.add("is-new");
-    tooltip(el, missing ? "Figure not found" : cm ? "Show " + label + " \xB7 drag to move" : "Show " + label);
+    tooltip(el, missing ? t("Figure not found") : cm ? t("Show {label} \xB7 drag to move", { label }) : t("Show {label}", { label }));
     el.addEventListener("click", (event) => {
       stop(event);
       if (Date.now() < (this.suppressClickUntil || 0)) return;
@@ -1484,13 +1572,13 @@ var GalleryView = class extends Plugin {
     this.commit(cm, { from: at, insert }, "reference");
     const pos = at + insert.length;
     cm.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "center" }) });
-    new Notice(label + " 的引用已加到正文末尾，可拖到任意位置。", 2500);
+    new Notice(t("Reference to {label} added at the end of the text. Drag it anywhere.", { label: figureText(label) }), 2500);
   }
   goToFigure(cm, galleryId, itemId) {
     const block = this.scanDoc(cm.state.doc).find((b) => b.model.id === galleryId);
     const item = block?.model.images.find((entry) => entry.id === itemId);
     if (!block || !item) {
-      new Notice("找不到这个 figure，它可能已被删除。");
+      new Notice(t("Figure not found. It may have been deleted."));
       return;
     }
     this.active.set(this.pathFor(cm) + ":" + galleryId, itemId);
@@ -1503,11 +1591,11 @@ var GalleryView = class extends Plugin {
     const candidates = [...this.uis].filter((entry) => !entry.cm && entry.root.isConnected && entry.block.model.id === galleryId && (!sourcePath || entry.sourcePath === sourcePath) && entry.root.ownerDocument === el.ownerDocument);
     const ui = candidates.find((entry) => container && container.contains(entry.root)) || candidates[0];
     if (!ui) {
-      new Notice("找不到这个 figure 所在的 Gallery。");
+      new Notice(t("Can't find the gallery that contains this figure."));
       return;
     }
     if (!ui.block.model.images.some((entry) => entry.id === itemId)) {
-      new Notice("找不到这个 figure，它可能已被删除。");
+      new Notice(t("Figure not found. It may have been deleted."));
       return;
     }
     const scroller = ui.root.closest(".markdown-preview-view") || ui.root.closest(".markdown-reading-view");
@@ -1673,12 +1761,12 @@ var GalleryView = class extends Plugin {
       if (!active) return;
       stop(e);
       if (cm.state.doc !== snapshot || this.pathFor(cm) !== sourcePath) {
-        new Notice("内容已变化，移动已取消。");
+        new Notice(t("The content changed. Move canceled."));
         return;
       }
       if (!drop || drop.same) return;
       if (drop.blocked) {
-        new Notice("引用只能放在它所属 Gallery 的区域内。", 2500);
+        new Notice(t("A reference can only be placed within its own gallery's section."), 2500);
         return;
       }
       this.moveRef(cm, token, drop);
@@ -1771,7 +1859,7 @@ var GalleryView = class extends Plugin {
     const images = this.selectionImages(editor.cm, target);
     if (!images.length) return;
     const snapshot = editor.cm.state.doc;
-    menu.addItem((i) => i.setTitle("Gallery").setIcon("images").onClick(() => {
+    menu.addItem((i) => i.setTitle(t("Gallery")).setIcon("images").onClick(() => {
       if (editor.cm.state.doc === snapshot) this.createGallery(editor.cm, target);
     }));
   }
@@ -1888,7 +1976,7 @@ var GalleryView = class extends Plugin {
     let links = [];
     if (origin) {
       if (origin.cm !== ui.cm || origin.snapshot !== snapshot) {
-        new Notice("请在同一编辑器中移动图片。");
+        new Notice(t("Move images within the same editor."));
         return;
       }
       links = origin.images.map((i) => i.link);
@@ -1915,7 +2003,7 @@ var GalleryView = class extends Plugin {
     }
     if (!links.length) return;
     if (ui.cm.state.doc !== snapshot) {
-      new Notice("编辑器已变化，请重新拖入；导入的附件仍保留在库中。");
+      new Notice(t("The editor changed. Drop again; imported attachments stay in the vault."));
       return;
     }
     const block = this.blockFor(ui);
@@ -2021,7 +2109,7 @@ var GalleryView = class extends Plugin {
       }
       stop(e);
       if (cm.state.doc !== snapshot || this.pathFor(cm) !== sourcePath) {
-        new Notice("内容已变化，移动已取消。");
+        new Notice(t("The content changed. Move canceled."));
         return;
       }
       if (origin) {
@@ -2103,20 +2191,29 @@ var GallerySettingTab = class extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new Setting(containerEl).setName("Developer mode").setDesc("Show fine-tuning controls.").addToggle((toggle) => toggle.setValue(this.plugin.settings.devMode).onChange(async (value) => {
+    new Setting(containerEl).setName(t("Language")).setDesc(t("Follow Obsidian's language, or choose one for this plugin.")).addDropdown((dropdown) => dropdown.addOption("auto", t("Follow Obsidian")).addOption("en", "English").addOption("zh", "中文").setValue(this.plugin.settings.language || "auto").onChange(async (value) => {
+      this.plugin.settings.language = value;
+      paipaLang = value;
+      await this.plugin.saveSettings();
+      this.display();
+      this.plugin.refreshLanguage();
+    }));
+    // Developer-mode settings are no longer shown. The stored devMode / refOffset values are kept and still apply.
+    if (!GallerySettingTab.SHOW_DEV_SETTINGS) return;
+    new Setting(containerEl).setName(t("Developer mode")).setDesc(t("Show fine-tuning controls.")).addToggle((toggle) => toggle.setValue(this.plugin.settings.devMode).onChange(async (value) => {
       this.plugin.settings.devMode = value;
       await this.plugin.saveSettings();
       this.display();
     }));
     if (!this.plugin.settings.devMode) return;
-    const setting = new Setting(containerEl).setName("Figure label vertical offset").setDesc("Nudges the text inside figure reference buttons. Positive moves it down. Unit: px.");
+    const setting = new Setting(containerEl).setName(t("Figure label vertical offset")).setDesc(t("Nudges the text inside figure reference buttons. Positive moves it down. Unit: px."));
     let label;
     setting.addSlider((slider) => slider.setLimits(-3, 3, 0.25).setValue(this.plugin.settings.refOffset).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.refOffset = value;
       if (label) label.textContent = value.toFixed(2) + " px";
       await this.plugin.saveSettings();
     }));
-    setting.addExtraButton((button) => button.setIcon("rotate-ccw").setTooltip("Reset").onClick(async () => {
+    setting.addExtraButton((button) => button.setIcon("rotate-ccw").setTooltip(t("Reset")).onClick(async () => {
       this.plugin.settings.refOffset = DEFAULT_SETTINGS.refOffset;
       await this.plugin.saveSettings();
       this.display();
@@ -2156,6 +2253,7 @@ function jpegDimensions(buffer) {
   }
   return null;
 }
+GallerySettingTab.SHOW_DEV_SETTINGS = false;
 GalleryView.jpegDimensions = jpegDimensions;
 GalleryView.SCALED = { thumb: 192, hero: 2048 };
 GalleryView.SCALED_CACHE = 400;

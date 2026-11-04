@@ -53,7 +53,7 @@ All optional.
 
 ## Notes
 
-- Some tooltips and messages are currently in Chinese.
+- Interface in English and Chinese: follows Obsidian's language by default, or pick one under the plugin's **Language** setting.
 - UI inspired by Lite Gallery.
 
 ## Install
