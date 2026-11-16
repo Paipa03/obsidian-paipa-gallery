@@ -85,11 +85,20 @@
 .gv-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .gv-feedback { position: absolute; inset: 0; z-index: 3; pointer-events: none; background: rgba(139,112,210,.09); opacity: 0; }
 .gv-modal-container .modal-bg { background: #000; opacity: .8; }
-.gv-modal-container .gv-modal { width: fit-content; max-width: 94vw; height: fit-content; max-height: 94vh; padding: 36px 16px 16px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); }
-.gv-modal .modal-content { margin: 0; overflow: hidden; display: flex; justify-content: center; align-items: center; }
-.gv-original { display: block; width: auto; height: auto; max-width: calc(94vw - 34px); max-height: calc(94vh - 54px); object-fit: contain; user-select: none; }
+/* Fixed-size viewer: the frame and its arrows never move while paging; each image is fitted inside. */
+.gv-modal-container .gv-modal { box-sizing: border-box; display: flex; flex-direction: column; width: 94vw; max-width: 94vw; height: 94vh; max-height: 94vh; padding: 36px 16px 16px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); }
+.gv-modal .modal-content { position: relative; flex: 1 1 auto; min-height: 0; width: 100%; margin: 0; padding: 0; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+.gv-original { display: block; width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; }
+/* "Fit images to the viewer" on: smaller images are enlarged to fill the frame. */
+.gv-modal.is-fit .gv-original { width: 100%; height: 100%; }
 .gv-modal .modal-close-button { z-index: 1; }
-
+.gv-original-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 1; display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0; border: none; border-radius: 50%; background: rgba(0, 0, 0, .38); color: #fff; box-shadow: none; cursor: pointer; opacity: .75; transition: opacity .15s, background .15s; }
+.gv-original-nav.is-prev { left: 10px; }
+.gv-original-nav.is-next { right: 10px; }
+.gv-original-nav:hover { opacity: 1; background: rgba(0, 0, 0, .58); }
+.gv-original-nav[disabled] { opacity: .2; cursor: default; background: rgba(0, 0, 0, .38); }
+.gv-original-nav[hidden] { display: none; }
+.gv-original-nav .svg-icon { width: 22px; height: 22px; }
 /* Figure reference pill: quiet inline chip, text centered; on hover a single accent tick grows along the left edge to say "movable". */
 .gv-ref-wrap { display: inline-block; padding-inline: .3em; vertical-align: baseline; line-height: inherit; white-space: nowrap; }
 .gv-ref-text { position: relative; top: var(--gv-ref-offset, -2px); display: block; line-height: 1; }

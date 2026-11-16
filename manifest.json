@@ -1,9 +1,9 @@
 {
   "id": "paipa-gallery",
   "name": "Paipa Gallery",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "minAppVersion": "1.5.0",
-  "description": "Interactive image and video blocks with numbered figures, captions, in-text figure references, thumbnail reordering, and full-size preview.",
+  "description": "Many images and videos in one swipeable block: drag to reorder, numbered figures with captions, in-text figure references, and a full-size viewer with arrows. Can also downscale large photos.",
   "author": "paipa",
   "authorUrl": "https://github.com/Paipa03",
   "isDesktopOnly": false

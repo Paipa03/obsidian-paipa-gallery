@@ -1,5 +1,5 @@
 /*
- * Paipa Gallery 1.4.0 - by paipa, MIT License
+ * Paipa Gallery 1.5.0 - by paipa, MIT License
  * https://github.com/Paipa03/obsidian-paipa-gallery
  *
  * UI inspired by the Lite Gallery plugin.
@@ -61,7 +61,17 @@ var PAIPA_I18N_ZH = {
   "Show fine-tuning controls.": "显示微调选项。",
   "Figure label vertical offset": "图引用文字垂直偏移",
   "Nudges the text inside figure reference buttons. Positive moves it down. Unit: px.": "微调图引用按钮内文字的上下位置。正值向下移。单位：px。",
-  "Reset": "重置"
+  "Reset": "重置",
+  "Fit images to the viewer": "图片适应窗口",
+  "The full-size viewer fills its frame with every image, enlarging smaller ones; this applies to images already in galleries as soon as it is turned on. Large images dropped into a gallery are saved at the size the viewer needs on your largest screen (currently {long} × {short} px, long × short side), and only the smaller copy is stored. For large images already in a note, use the command \"Downscale images in this note's galleries\".": "原图窗口里的每张图都铺满画框，较小的图会被放大；打开后对 Gallery 里已有的图立即生效。拖进 Gallery 的大图按原图窗口在你最大的屏幕上所需的尺寸保存（当前为 {long} × {short} px，长边 × 短边），只存缩小后的版本。笔记里已有的大图，用命令「缩小本笔记 Gallery 里的图片」处理。",
+  "Downscale images in this note's galleries": "缩小本笔记 Gallery 里的图片",
+  "Downscale images": "缩小图片",
+  "Downscale": "缩小",
+  "Cancel": "取消",
+  "No images to downscale in this note.": "本笔记的 Gallery 里没有可缩小的图片。",
+  "{n} images in this note's galleries will be checked. Those larger than {long} × {short} px are replaced with a smaller copy. The original files are overwritten, and other notes that embed them change too. This can't be undone.": "将检查本笔记 Gallery 里的 {n} 张图片，大于 {long} × {short} px 的会被替换为缩小版。原文件会被覆盖，引用这些图片的其他笔记也会跟着变，无法撤销。",
+  "Downscaling images…": "正在缩小图片…",
+  "Downscaled {n} of {total} images.": "已缩小 {n} / {total} 张图片。"
 };
 var paipaLang = "auto";
 function paipaObsidianLang() {
@@ -285,7 +295,7 @@ var require_core = __commonJS({
 // plugin.js
 var obsidian = require("obsidian");
 var { Plugin, MarkdownRenderChild, Menu, Modal, Notice, setIcon, editorInfoField, editorLivePreviewField, PluginSettingTab, Setting } = obsidian;
-var DEFAULT_SETTINGS = { devMode: false, refOffset: -2, language: "auto" };
+var DEFAULT_SETTINGS = { devMode: false, refOffset: -2, language: "auto", resizeImages: false, screenBox: null };
 var { EditorState, StateField, StateEffect, Annotation, Transaction, Prec, ChangeSet } = require("@codemirror/state");
 var { EditorView, WidgetType, Decoration } = require("@codemirror/view");
 var core = require_core();
@@ -312,25 +322,84 @@ var clock = (seconds) => {
   const h = Math.floor(m / 60);
   return (h ? h + ":" + String(m % 60).padStart(2, "0") : m) + ":" + String(s).padStart(2, "0");
 };
+// Full-size viewer. Steps through the gallery's images (videos are skipped) with
+// arrow buttons inside the frame and the ← / → keys; the gallery follows along.
+// The list is re-read on every step, so edits made meanwhile (by another app, a script or Sync) count.
 var OriginalImageModal = class extends Modal {
-  constructor(plugin, src, label) {
+  constructor(plugin, ui, itemId) {
     super(plugin.app);
     this.plugin = plugin;
-    this.src = src;
-    this.label = label;
+    this.ui = ui;
+    this.itemId = itemId;
+  }
+  images() {
+    return this.ui.block.model.images.filter((item) => !core.isVideo(item.link));
+  }
+  // Read on every open and on every toggle of the setting, so images already in
+  // galleries follow it at once; nothing is cached per image.
+  applyFit() {
+    this.modalEl.classList.toggle("is-fit", !!this.plugin.settings.resizeImages);
   }
   onOpen() {
     this.plugin.modals.add(this);
     this.containerEl.classList.add("gv-modal-container");
     this.modalEl.classList.add("gv-modal");
-    this.modalEl.setAttribute("aria-label", this.label);
+    this.applyFit();
     const close = this.modalEl.querySelector(".modal-close-button, .modal-header-button");
     close?.setAttribute("aria-label", t("Close original image"));
-    const img = make(this.contentEl.ownerDocument, "img", "gv-original", this.contentEl);
-    img.src = this.src;
-    img.alt = this.label;
-    img.draggable = false;
-    img.addEventListener("dragstart", stop);
+    const doc = this.contentEl.ownerDocument;
+    this.img = make(doc, "img", "gv-original", this.contentEl);
+    this.img.draggable = false;
+    this.img.addEventListener("dragstart", stop);
+    const arrow = (side, icon, label, delta) => {
+      const b = make(doc, "button", "gv-original-nav is-" + side, this.contentEl);
+      b.type = "button";
+      b.setAttribute("aria-label", label);
+      setIcon(b, icon);
+      b.addEventListener("click", (event) => {
+        stop(event);
+        this.step(delta);
+      });
+      return b;
+    };
+    this.prevButton = arrow("prev", "chevron-left", t("Previous"), -1);
+    this.nextButton = arrow("next", "chevron-right", t("Next"), 1);
+    this.scope.register([], "ArrowLeft", () => (this.step(-1), false));
+    this.scope.register([], "ArrowRight", () => (this.step(1), false));
+    this.show();
+  }
+  show() {
+    const images = this.images();
+    let index = images.findIndex((item2) => item2.id === this.itemId);
+    if (index < 0) index = 0;
+    const item = images[index];
+    if (!item) {
+      this.close();
+      return;
+    }
+    this.itemId = item.id;
+    const label = this.plugin.label(item.link);
+    this.img.src = this.plugin.imageURL(item.link, this.ui.sourcePath);
+    this.img.alt = label;
+    this.modalEl.setAttribute("aria-label", label);
+    const single = images.length < 2;
+    this.prevButton.hidden = this.nextButton.hidden = single;
+    this.prevButton.toggleAttribute("disabled", index <= 0);
+    this.nextButton.toggleAttribute("disabled", index >= images.length - 1);
+    for (const near of [images[index - 1], images[index + 1]]) {
+      if (near) new Image().src = this.plugin.imageURL(near.link, this.ui.sourcePath);
+    }
+  }
+  step(delta) {
+    const images = this.images(), index = images.findIndex((item) => item.id === this.itemId);
+    const target = images[index + delta];
+    if (index < 0 || !target) {
+      this.show();
+      return;
+    }
+    this.itemId = target.id;
+    this.show();
+    if (this.ui.root.isConnected) this.ui.select(target.id);
   }
   onClose() {
     this.contentEl.empty();
@@ -431,7 +500,7 @@ var GalleryUI = class {
     this.strip.setAttribute("role", "list");
     this.hero.addEventListener("click", () => {
       const item = this.current();
-      if (item && !core.isVideo(item.link)) new OriginalImageModal(plugin, plugin.imageURL(item.link, this.sourcePath), plugin.label(item.link)).open();
+      if (item && !core.isVideo(item.link)) new OriginalImageModal(plugin, this, item.id).open();
     });
     this.hero.addEventListener("dragstart", stop);
     this.heroImage.addEventListener("error", () => {
@@ -1005,6 +1074,8 @@ var GalleryView = class extends Plugin {
     }));
     this.addCommand({ id: "create-gallery", name: t("Create gallery"), editorCallback: (editor) => this.createGallery(editor.cm) });
     this.addCommand({ id: "convert-lite-gallery", name: t("Convert Lite Gallery at cursor"), editorCallback: (editor) => this.convertLite(editor.cm) });
+    this.addCommand({ id: "downscale-gallery-images", name: t("Downscale images in this note's galleries"), editorCallback: (editor) => this.downscaleNote(editor.cm) });
+    this.noteScreen();
     this.registerEvent(this.app.workspace.on("nsb:engine-ready", () => this.refreshEditors()));
     this.registerEvent(this.app.workspace.on("layout-change", () => this.attachDocuments()));
     this.docs = /* @__PURE__ */ new WeakSet();
@@ -1227,7 +1298,10 @@ var GalleryView = class extends Plugin {
   guard(tr) {
     if (!tr.docChanged || tr.annotation(authorized)) return tr;
     const event = tr.annotation(Transaction.userEvent) || "";
-    if (/^(undo|redo)(\.|$)/.test(event)) return tr;
+    // "set" = Obsidian syncing the editor to the file after an outside write
+    // (another app, a script, Sync). The file already holds that text, so blocking it
+    // would leave a stale editor that later saves the old gallery back over the edit.
+    if (/^(undo|redo|set)(\.|$)/.test(event)) return tr;
     if (!core.preserved(this.textOf(tr.startState.doc), this.textOf(tr.newDoc))) return [];
     return tr;
   }
@@ -1958,6 +2032,74 @@ var GalleryView = class extends Plugin {
     if (images.length === 1) return { cm, snapshot: cm.state.doc, images, sourcePath: this.pathFor(cm) };
     return null;
   }
+  // ---- downscaling stored images ---------------------------------------------
+  // Target box: the full-size viewer (94% of the screen) in device pixels, on the
+  // largest screen this vault has been opened on. data.json syncs, so desktop and
+  // phone both count. An image is fitted long side to long side, so a portrait
+  // photo stays sharp on a phone held upright and on a landscape monitor alike.
+  noteScreen() {
+    const s = window.screen, dpr = window.devicePixelRatio || 1;
+    if (!s || !s.width || !s.height) return;
+    const a = Math.round(s.width * dpr * 0.94), b = Math.round(s.height * dpr * 0.94);
+    const old = this.settings.screenBox, long = Math.max(a, b), short = Math.min(a, b);
+    if (old && old.long >= long && old.short >= short) return;
+    this.settings.screenBox = { long: Math.max(long, old?.long || 0), short: Math.max(short, old?.short || 0) };
+    this.saveData(this.settings);
+  }
+  resizeBox() {
+    const box = this.settings.screenBox;
+    return box && box.long > 0 && box.short > 0 ? box : { long: 2048, short: 2048 };
+  }
+  // Re-encodes the image to fit resizeBox(); null when it already fits, the
+  // format isn't handled (gif / svg / avif / heic…) or the copy isn't smaller.
+  async shrinkImage(data, name) {
+    const type = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp" }[String(name).split(".").pop().toLowerCase()];
+    if (!type) return null;
+    const bitmap = await createImageBitmap(new Blob([data], { type }));
+    try {
+      const size = resizeTarget(bitmap.width, bitmap.height, this.resizeBox());
+      if (!size) return null;
+      const canvas = typeof OffscreenCanvas === "function" ? new OffscreenCanvas(size[0], size[1]) : Object.assign(document.createElement("canvas"), { width: size[0], height: size[1] });
+      const ctx = canvas.getContext("2d");
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(bitmap, 0, 0, size[0], size[1]);
+      const blob = canvas.convertToBlob ? await canvas.convertToBlob({ type, quality: 0.9 }) : await new Promise((resolve) => canvas.toBlob(resolve, type, 0.9));
+      if (!blob || blob.type !== type || blob.size >= data.byteLength) return null;
+      return { data: await blob.arrayBuffer(), width: size[0], height: size[1] };
+    } finally {
+      bitmap.close();
+    }
+  }
+  downscaleNote(cm) {
+    const sourcePath = this.pathFor(cm), files = /* @__PURE__ */ new Map();
+    for (const block of this.scanDoc(cm.state.doc)) for (const item of block.model.images) {
+      const file = this.imageFile(item.link, sourcePath);
+      if (file && /^(jpe?g|png|webp)$/i.test(file.extension)) files.set(file.path, file);
+    }
+    if (!files.size) {
+      new Notice(t("No images to downscale in this note."));
+      return;
+    }
+    const box = this.resizeBox();
+    new ConfirmModal(this.app, t("Downscale images"), t("{n} images in this note's galleries will be checked. Those larger than {long} × {short} px are replaced with a smaller copy. The original files are overwritten, and other notes that embed them change too. This can't be undone.", { n: files.size, long: box.long, short: box.short }), t("Downscale"), async () => {
+      const notice = new Notice(t("Downscaling images…"), 0);
+      let done = 0;
+      for (const file of files.values()) {
+        try {
+          const result = await this.shrinkImage(await this.app.vault.readBinary(file), file.name);
+          if (result) {
+            await this.app.vault.modifyBinary(file, result.data);
+            done++;
+          }
+        } catch (error) {
+          console.error("Paipa Gallery:", file.path, error);
+        }
+      }
+      notice.hide();
+      new Notice(t("Downscaled {n} of {total} images.", { n: done, total: files.size }));
+    }).open();
+  }
   // Where a file dropped into a gallery is created. Section Blocks (if installed
   // and its "Organize media" is on) answers with the note's "<note> media"
   // folder; otherwise Obsidian's own attachment setting decides.
@@ -1997,7 +2139,9 @@ var GalleryView = class extends Plugin {
       if (!links.length) for (const file of Array.from(event.dataTransfer.files)) {
         if (!core.mediaExtension.test(file.name)) continue;
         const path = await this.attachmentPath(file.name, ui.sourcePath);
-        const attachment = await this.app.vault.createBinary(path, await file.arrayBuffer());
+        let data = await file.arrayBuffer();
+        if (this.settings.resizeImages) data = (await this.shrinkImage(data, file.name).catch(() => null))?.data || data;
+        const attachment = await this.app.vault.createBinary(path, data);
         links.push(this.app.fileManager.generateMarkdownLink(attachment, ui.sourcePath).replace(/^\[/, "!["));
       }
     }
@@ -2183,6 +2327,37 @@ var GalleryView = class extends Plugin {
     frame = win.requestAnimationFrame(tick);
   }
 };
+// Scale (never up) so the long side fits box.long and the short side box.short.
+function resizeTarget(width, height, box) {
+  const scale = Math.min(1, box.long / Math.max(width, height), box.short / Math.min(width, height));
+  return scale >= 1 ? null : [Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale))];
+}
+var ConfirmModal = class extends Modal {
+  constructor(app, title, text, action, onConfirm) {
+    super(app);
+    this.title = title;
+    this.text = text;
+    this.action = action;
+    this.onConfirm = onConfirm;
+  }
+  onOpen() {
+    this.titleEl.textContent = this.title;
+    const doc = this.contentEl.ownerDocument;
+    make(doc, "p", "", this.contentEl).textContent = this.text;
+    const row = make(doc, "div", "modal-button-container", this.contentEl);
+    const ok = make(doc, "button", "mod-warning", row);
+    ok.textContent = this.action;
+    ok.addEventListener("click", () => {
+      this.close();
+      this.onConfirm();
+    });
+    make(doc, "button", "", row).textContent = t("Cancel");
+    row.lastChild.addEventListener("click", () => this.close());
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
 var GallerySettingTab = class extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
@@ -2197,6 +2372,12 @@ var GallerySettingTab = class extends PluginSettingTab {
       await this.plugin.saveSettings();
       this.display();
       this.plugin.refreshLanguage();
+    }));
+    const box = this.plugin.resizeBox();
+    new Setting(containerEl).setName(t("Fit images to the viewer")).setDesc(t("The full-size viewer fills its frame with every image, enlarging smaller ones; this applies to images already in galleries as soon as it is turned on. Large images dropped into a gallery are saved at the size the viewer needs on your largest screen (currently {long} × {short} px, long × short side), and only the smaller copy is stored. For large images already in a note, use the command \"Downscale images in this note's galleries\".", box)).addToggle((toggle) => toggle.setValue(!!this.plugin.settings.resizeImages).onChange(async (value) => {
+      this.plugin.settings.resizeImages = value;
+      await this.plugin.saveSettings();
+      for (const modal of this.plugin.modals) modal.applyFit?.();
     }));
     // Developer-mode settings are no longer shown. The stored devMode / refOffset values are kept and still apply.
     if (!GallerySettingTab.SHOW_DEV_SETTINGS) return;

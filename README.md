@@ -1,36 +1,39 @@
 # Paipa Gallery
 
-**Put a whole set of photos or videos into one tidy, swipeable block instead of a long column of images.**
+**Many images and videos in one tidy, swipeable block — instead of a long column of pictures.**
 
 ![A gallery block with a main image, caption and thumbnail strip](https://raw.githubusercontent.com/Paipa03/obsidian-paipa-gallery/main/docs/demo.png)
 
-## Is this for you?
+## Features
 
-- You drop ten trip photos into a note and suddenly have to scroll forever.
-- You write reports, papers or project logs and want **Figure 1, Figure 2…** with captions, and references in your text that jump to the right image.
-- You want to reorder images by dragging thumbnails, not by moving `![[...]]` lines around.
-- Your vault has big camera photos and pages with images feel sluggish.
-
-## What you get
-
-- **One block, many images and videos**: arrows / arrow keys to browse, click the main image to open the original.
-- **Thumbnails you can drag** to reorder. Drag a thumbnail out to place it in the note, or drag an image from the note or your file manager into the gallery.
-- **Figures and captions**: every item is numbered (`Figure N`). Double-click to write a caption; numbering follows the order automatically.
-- **Figure references**: right-click a thumbnail → **Insert reference** puts a small button in your text that scrolls to that figure.
-- **Video player**: play / pause, seek, volume, playback speed.
-- **Fast with large photos**: thumbnails and the main view use small copies made on the fly; the full file loads only when you open it.
+- **Browse**: arrows or ← / → to step through; click the main image for the full-size viewer, which has its own arrows and keeps the same size while you page.
+- **Reorder by dragging thumbnails.** Drag a thumbnail out to put the image back in the note; drag images in from the note or your file manager.
+- **Figures and captions**: items are numbered `Figure 1, 2…` automatically. Double-click the label to add a caption.
+- **Figure references**: right-click a thumbnail → **Insert reference** adds a button in your text that jumps to that figure. Numbers update when you reorder.
+- **Videos** (mp4, webm, mov…): play / pause, seek, volume, speed.
+- **Fast with large photos**: the block shows small copies made on the fly; the original loads only in the full-size viewer.
+- **Safe to edit from outside**: changes made to the note by another app, a script or Sync show up while the note is open. Accidentally deleting a whole gallery in the editor is blocked.
 
 ## Quick start
 
-1. Select a few image or video links in a note.
-2. Right-click → **Gallery** (or run **Create gallery**).
-3. That's it. Drag thumbnails to reorder, double-click `Figure 1` to add a caption.
+1. Select some image or video links in a note.
+2. Right-click → **Gallery**, or run the command **Create gallery**.
+3. Drag thumbnails to reorder; double-click `Figure 1` to add a caption.
 
 Coming from Lite Gallery? Put the cursor in a `litegal` block and run **Convert Lite Gallery at cursor**.
 
+## Settings
+
+| Setting | What it does |
+|---|---|
+| **Fit images to the viewer** (off by default) | The full-size viewer fills its frame with every image, enlarging small ones; applies to existing galleries immediately. Large images dropped into a gallery are saved at the size the viewer needs on your largest screen (shown in the setting) — only the smaller copy is stored. JPG, PNG and WebP only; never enlarges files. |
+| **Language** | Follow Obsidian, English or 中文. |
+
+Command **Downscale images in this note's galleries** shrinks large images already in the note's galleries to the same size. It asks first, then **overwrites the original files** (other notes embedding them change too).
+
 ## Your data
 
-A gallery is a fenced code block with a small JSON list of your images:
+A gallery is a fenced code block holding a small JSON list:
 
 ````markdown
 ```gallery-view
@@ -38,28 +41,19 @@ A gallery is a fenced code block with a small JSON list of your images:
 ```
 ````
 
-Your images stay normal files in your vault. Without the plugin you see the code block, and the files are untouched.
+Images stay ordinary files in your vault. Without the plugin you just see the code block.
 
 ## Works on
 
-Windows, macOS, Linux, iPhone / iPad and Android. On touch screens, tap a thumbnail to select it and long-press to drag.
+Desktop, iPhone / iPad and Android. On touch screens: tap a thumbnail to select, long-press to drag.
 
-## Works well with
-
-All optional.
+## Works well with (optional)
 
 - [Editor Enhancer](https://github.com/Paipa03/obsidian-editor-enhancer): drag the whole gallery like any other block.
-- [Section Blocks](https://github.com/Paipa03/obsidian-section-blocks): files dropped into a gallery are saved in a `<note name> media` folder next to the note. Without it, Obsidian's own attachment setting decides where they go.
-
-## Notes
-
-- Interface in English and Chinese: follows Obsidian's language by default, or pick one under the plugin's **Language** setting.
-- UI inspired by Lite Gallery.
+- [Section Blocks](https://github.com/Paipa03/obsidian-section-blocks): dropped files go to a `<note name> media` folder next to the note.
 
 ## Install
 
-**Settings → Community plugins → Browse**, search **Paipa Gallery**, then Install and Enable.
+**Settings → Community plugins → Browse**, search **Paipa Gallery**, Install, Enable.
 
-## License
-
-MIT
+[Changelog](CHANGELOG.md) · MIT License · UI inspired by Lite Gallery.
