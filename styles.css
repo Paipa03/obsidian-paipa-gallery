@@ -88,7 +88,24 @@
 /* Fixed-size viewer: the frame and its arrows never move while paging; each image is fitted inside. */
 .gv-modal-container .gv-modal { box-sizing: border-box; display: flex; flex-direction: column; width: 94vw; max-width: 94vw; height: 94vh; max-height: 94vh; padding: 36px 16px 16px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); }
 .gv-modal .modal-content { position: relative; flex: 1 1 auto; min-height: 0; width: 100%; margin: 0; padding: 0; overflow: hidden; display: flex; justify-content: center; align-items: center; }
-.gv-original { display: block; width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; }
+.gv-original { display: block; width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; transform-origin: 0 0; }
+/* Ctrl + wheel zoom: only the image moves; the frame clips what overflows. Drag pans while zoomed in. */
+.gv-modal .modal-content { touch-action: none; }
+/* Own compositor layer only while moving (no per-frame re-raster → no ghost tiles at the edges). */
+.gv-original.is-moving { will-change: transform; }
+.gv-original.is-settling { transition: transform .2s cubic-bezier(.2, .8, .2, 1); }
+.gv-original.is-sliding { transition: transform .28s cubic-bezier(.25, .8, .25, 1); }
+/* Neighbour image shown beside the current one while swiping; centred like the main image. */
+.gv-original.gv-original-peek { position: absolute; inset: 0; margin: auto; will-change: transform; pointer-events: none; }
+.gv-original.gv-original-peek[hidden] { display: none; }
+/* Phone viewer: no panel. The modal covers the screen transparently and the picture itself is
+   the window; a tap outside the picture closes it. */
+body.is-mobile .modal-container.gv-modal-container.is-phone-viewer .modal.gv-modal { position: fixed; inset: 0; width: 100%; max-width: none; height: 100%; max-height: none; margin: 0; border: 0; border-radius: 0; box-shadow: none; background: rgba(0, 0, 0, .6); padding: calc(var(--safe-area-inset-top, 0px) + 12px) 12px calc(var(--safe-area-inset-bottom, 0px) + 12px); transform: none; }
+body.is-mobile .modal-container.gv-modal-container.is-phone-viewer .modal-close-button,
+body.is-mobile .modal-container.gv-modal-container.is-phone-viewer .modal-header-button,
+body.is-mobile .modal-container.gv-modal-container.is-phone-viewer .modal-header { display: none; }
+.gv-modal .modal-content.is-zoomed { cursor: grab; }
+.gv-modal .modal-content.is-panning { cursor: grabbing; }
 /* "Fit images to the viewer" on: smaller images are enlarged to fill the frame. */
 .gv-modal.is-fit .gv-original { width: 100%; height: 100%; }
 .gv-modal .modal-close-button { z-index: 1; }
@@ -127,6 +144,9 @@ body.gv-ref-blocked, body.gv-ref-blocked * { cursor: not-allowed !important; }
 body.is-mobile .gv-stage { grid-template-columns: 44px minmax(0,1fr) 44px; gap: 2px; padding-inline: 2px; }
 body.is-mobile .gv .gv-arrow { width: 44px; height: 44px; padding: 12px; }
 body.is-mobile .gv-caption { padding-inline: 48px; }
+/* Tapping the main image opens the viewer straight away: no grey tap / active fill around it. */
+.gv .gv-hero { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+body.is-mobile .gv .gv-hero, body.is-mobile .gv .gv-hero:hover, body.is-mobile .gv .gv-hero:active, body.is-mobile .gv .gv-hero:focus, body.is-mobile .gv .gv-hero:focus-visible { background: transparent; box-shadow: none; outline: none; }
 @media (pointer: coarse) {
   .gv-stage { grid-template-columns: 44px minmax(0,1fr) 44px; gap: 2px; padding-inline: 2px; }
   .gv .gv-arrow { width: 44px; height: 44px; padding: 12px; }

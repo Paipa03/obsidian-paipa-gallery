@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.0
+
+- **Zoom in the full-size viewer**: Ctrl + scroll (or trackpad pinch) zooms around the pointer, only inside the frame; drag to pan. Zoom snaps at the fitted size. No flicker at the edges while zooming.
+- **Phones**: the viewer is just the picture (no panel, no arrows). Swipe to page with a sliding animation, pinch to zoom, drag to pan; when zoomed, keep dragging past the edge to go to the next image. Tap outside the picture to close. No grey flash when tapping the main image.
+- **Fit images to the viewer**: phones no longer re-encode images. Images added to a gallery on a phone are shrunk the next time a desktop shows that gallery.
+- Thumbnail menu: **Show in system explorer** (desktop).
+- **Insert reference** now goes at the end of the gallery's section, above the next heading.
+- Dragging an image out of a gallery and back no longer leaves blank lines.
+
 ## 1.5.0
 
 - **Full-size viewer arrows**: previous / next buttons inside the frame, plus ← / →. Videos are skipped. The gallery follows the image you're viewing.

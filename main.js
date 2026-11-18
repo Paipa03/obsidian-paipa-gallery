@@ -1,5 +1,5 @@
 /*
- * Paipa Gallery 1.5.0 - by paipa, MIT License
+ * Paipa Gallery 1.7.0 - by paipa, MIT License
  * https://github.com/Paipa03/obsidian-paipa-gallery
  *
  * UI inspired by the Lite Gallery plugin.
@@ -26,6 +26,7 @@ var PAIPA_I18N_ZH = {
   "Media list": "媒体列表",
   "Image can't be loaded": "图片无法读取",
   "Insert reference": "插入引用",
+  "Show in system explorer": "在系统资源管理器中显示",
   "Remove video": "移除视频",
   "Remove image": "移除图片",
   "Couldn't add media: {error}": "无法加入媒体：{error}",
@@ -344,6 +345,9 @@ var OriginalImageModal = class extends Modal {
     this.plugin.modals.add(this);
     this.containerEl.classList.add("gv-modal-container");
     this.modalEl.classList.add("gv-modal");
+    // Phone: no panel and no arrows; the picture itself is the window, swipe to page.
+    this.phone = !!obsidian.Platform?.isMobile;
+    this.containerEl.classList.toggle("is-phone-viewer", this.phone);
     this.applyFit();
     const close = this.modalEl.querySelector(".modal-close-button, .modal-header-button");
     close?.setAttribute("aria-label", t("Close original image"));
@@ -366,7 +370,389 @@ var OriginalImageModal = class extends Modal {
     this.nextButton = arrow("next", "chevron-right", t("Next"), 1);
     this.scope.register([], "ArrowLeft", () => (this.step(-1), false));
     this.scope.register([], "ArrowRight", () => (this.step(1), false));
+    this.setupZoom();
     this.show();
+  }
+  // Zoom and swipe inside the image frame (.modal-content clips the overflow; only the image moves).
+  // Desktop: Ctrl + wheel zooms about the pointer, only while the pointer is inside the frame; drag
+  // pans while zoomed in. Touch: two fingers pinch about their midpoint; one finger swipes to the
+  // previous / next image at 1×, pans when zoomed in, and a swipe that keeps going past the image's
+  // left / right edge switches image. Zoom is kept in log space with a detent at the fitted size (1×).
+  // While the image moves it sits on its own compositor layer (.is-moving → will-change), so frames
+  // are only recomposited, not re-rasterised: re-rastering every frame (slow with software
+  // rendering) drew late tiles at the edges as a flickering ghost. The layer is dropped shortly after
+  // the motion stops so the image re-rasterises sharp at its new scale.
+  // Paging, closing and resizing reset the zoom.
+  setupZoom() {
+    const frame = this.contentEl, win = frame.ownerDocument.defaultView || window;
+    this.zoom = { z: 0, target: 0, scale: 1, tx: 0, ty: 0, ux: 0, uy: 0, qx: 0, qy: 0, hold: 0, lastWheel: 0, raf: 0, last: 0, shift: 0 };
+    // One mouse notch (deltaY 100) is 0.2 in log space: it always leaves 1×, while crossing 1× stops
+    // there; small trackpad deltas have to add up to DETENT before they move off it.
+    const DETENT = 0.15, MIN = Math.log(0.25), MAX = Math.log(16);
+    this.onZoomWheel = (event) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const r = frame.getBoundingClientRect();
+      if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) return;
+      if (!this.img.naturalWidth) return;
+      const zm = this.zoom, now = performance.now();
+      if (now - zm.lastWheel > 600) zm.hold = 0;
+      zm.lastWheel = now;
+      const unit = event.deltaMode === 1 ? 33 : event.deltaMode === 2 ? 400 : 1;
+      const dz = -event.deltaY * unit * 2e-3;
+      if (!dz) return;
+      let next;
+      if (zm.target === 0) {
+        if (zm.hold && Math.sign(zm.hold) !== Math.sign(dz)) zm.hold = 0;
+        zm.hold += dz;
+        if (Math.abs(zm.hold) < DETENT) return;
+        next = zm.hold - Math.sign(zm.hold) * DETENT / 2;
+        zm.hold = 0;
+      } else {
+        next = zm.target + dz;
+        if (Math.sign(next) !== Math.sign(zm.target) || Math.abs(next) < 0.03) {
+          next = 0;
+          zm.hold = 0;
+        }
+      }
+      next = Math.min(MAX, Math.max(MIN, next));
+      this.anchorZoom(event.clientX, event.clientY);
+      zm.target = next;
+      this.animateZoom();
+    };
+    this.containerEl.addEventListener("wheel", this.onZoomWheel, { passive: false, capture: true });
+    this.onPanDown = (event) => {
+      if (event.button !== 0 || this.zoom.scale <= 1.001 || event.target.closest(".gv-original-nav")) return;
+      stop(event);
+      this.finishZoom();
+      const zm = this.zoom, sx = event.clientX - zm.tx, sy = event.clientY - zm.ty;
+      frame.classList.add("is-panning");
+      this.moving(true);
+      const move = (e) => {
+        zm.tx = e.clientX - sx;
+        zm.ty = e.clientY - sy;
+        this.clampZoom();
+        this.applyZoom();
+      };
+      const up = () => {
+        frame.classList.remove("is-panning");
+        this.moving(false);
+        win.removeEventListener("mousemove", move, true);
+        win.removeEventListener("mouseup", up, true);
+      };
+      win.addEventListener("mousemove", move, true);
+      win.addEventListener("mouseup", up, true);
+    };
+    frame.addEventListener("mousedown", this.onPanDown);
+    this.setupTouch(MAX);
+    this.onZoomResize = () => this.resetZoom();
+    win.addEventListener("resize", this.onZoomResize);
+    this.img.addEventListener("load", () => this.resetZoom());
+  }
+  setupTouch(MAX) {
+    const frame = this.contentEl;
+    // Pinch detent: finger spread is mapped through a dead zone of PINCH_DETENT around 1×, so the
+    // scale sticks at 1× until the fingers have moved that much further. The map is continuous
+    // (no jump on entering or leaving the dead zone) and is carried across gestures via toRaw().
+    const PINCH_DETENT = 0.12, PINCH_MIN = Math.log(0.5), SWIPE = 60, EDGE = 70;
+    const fromRaw = (r) => Math.abs(r) <= PINCH_DETENT ? 0 : r - Math.sign(r) * PINCH_DETENT;
+    const toRaw = (z) => z === 0 ? 0 : z + Math.sign(z) * PINCH_DETENT;
+    // Rubber band: follows the finger at first, then flattens out toward RUBBER px.
+    const RUBBER = 120, rubber = (d) => Math.sign(d) * RUBBER * (1 - Math.exp(-Math.abs(d) * 0.5 / RUBBER));
+    let g = null;
+    const mid = (touches) => ({ x: (touches[0].clientX + touches[1].clientX) / 2, y: (touches[0].clientY + touches[1].clientY) / 2 });
+    const spread = (touches) => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY) || 1;
+    const begin = (touches) => {
+      const zm = this.zoom;
+      this.finishZoom();
+      this.settle(false);
+      this.moving(true);
+      zm.shift = 0;
+      this.peekAt(0);
+      if (touches.length >= 2) {
+        const m = mid(touches);
+        this.anchorZoom(m.x, m.y);
+        g = { mode: "pinch", d0: spread(touches), raw0: toRaw(zm.z), m };
+      } else {
+        const t0 = touches[0];
+        g = { mode: zm.scale > 1.001 ? "pan" : "swipe", x0: t0.clientX, y0: t0.clientY, sx: t0.clientX - zm.tx, sy: t0.clientY - zm.ty, t: performance.now(), axis: null, over: 0, dx: 0 };
+      }
+    };
+    const end = (cancelled) => {
+      const zm = this.zoom, done = g;
+      g = null;
+      if (!done) return;
+      if (done.mode === "pinch") {
+        // Below 1× (or a hair above it) springs back to the fitted size.
+        if (zm.z < 0.03) {
+          this.anchorZoom(done.m.x, done.m.y);
+          zm.target = 0;
+          this.animateZoom();
+          return;
+        }
+        this.moving(false);
+        return;
+      }
+      const dt = Math.max(1, performance.now() - done.t);
+      // Phone: a quick tap outside the picture closes the viewer (the frame covers the backdrop).
+      if (!cancelled && !done.axis && dt < 350 && done.mode === "swipe" && this.phone && !this.onPicture(done.x0, done.y0)) {
+        this.moving(false);
+        this.close();
+        return;
+      }
+      if (done.mode === "pan") {
+        const side = done.over < 0 ? 1 : -1;
+        if (!cancelled && done.axis === "x" && Math.abs(done.over) > EDGE && this.hasNeighbor(side)) {
+          this.slideTo(side);
+          return;
+        }
+        if (zm.shift) this.settle(true);
+        this.moving(false);
+        return;
+      }
+      const side = done.dx < 0 ? 1 : -1;
+      const flick = Math.abs(done.dx) > 20 && Math.abs(done.dx) / dt > 0.5;
+      if (!cancelled && done.axis === "x" && (Math.abs(done.dx) > SWIPE || flick) && this.hasNeighbor(side)) {
+        this.slideTo(side);
+        return;
+      }
+      if (zm.shift) this.settle(true);
+      this.moving(false);
+    };
+    frame.addEventListener("touchstart", (event) => {
+      if (event.target.closest(".gv-original-nav")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!this.img.naturalWidth || this.sliding) return;
+      if (g && g.mode !== "pinch" && event.touches.length >= 2 || !g) begin(event.touches);
+    }, { passive: false });
+    frame.addEventListener("touchmove", (event) => {
+      if (!g) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const zm = this.zoom, touches = event.touches;
+      if (g.mode === "pinch") {
+        if (touches.length < 2) return;
+        const m = mid(touches), r = frame.getBoundingClientRect();
+        const z = Math.min(MAX, Math.max(PINCH_MIN, fromRaw(g.raw0 + Math.log(spread(touches) / g.d0))));
+        zm.z = zm.target = z;
+        zm.scale = Math.exp(z);
+        g.m = m;
+        zm.tx = m.x - r.left - this.img.offsetLeft - zm.qx * zm.scale;
+        zm.ty = m.y - r.top - this.img.offsetTop - zm.qy * zm.scale;
+        this.clampZoom();
+        this.applyZoom();
+        return;
+      }
+      const t0 = touches[0], dx = t0.clientX - g.x0, dy = t0.clientY - g.y0;
+      if (!g.axis && Math.hypot(dx, dy) > 8) g.axis = Math.abs(dx) >= Math.abs(dy) ? "x" : "y";
+      if (g.mode === "pan") {
+        const wantX = t0.clientX - g.sx;
+        zm.tx = wantX;
+        zm.ty = t0.clientY - g.sy;
+        this.clampZoom();
+        // Dragging past the left / right edge: the image follows with resistance (rubber band)
+        // and the neighbour peeks in; far enough and the release slides to it.
+        g.over = wantX - zm.tx;
+        zm.shift = rubber(g.over);
+        this.peekAt(g.over < -1 ? 1 : g.over > 1 ? -1 : 0);
+        this.applyZoom();
+        return;
+      }
+      g.dx = dx;
+      if (g.axis !== "x") return;
+      const side = dx < 0 ? 1 : -1, near = this.hasNeighbor(side);
+      zm.shift = near ? dx : rubber(dx);
+      this.peekAt(near ? side : 0);
+      this.applyZoom();
+    }, { passive: false });
+    const lift = (event) => {
+      if (!g) return;
+      event.stopPropagation();
+      if (event.type === "touchcancel") return end(true);
+      if (event.touches.length >= 1 && g.mode === "pinch") {
+        // One finger left on the glass after a pinch: carry on as a pan / swipe from where it is.
+        if (this.zoom.z < 0.03) return;
+        begin(event.touches);
+        return;
+      }
+      if (event.touches.length === 0) end(false);
+    };
+    frame.addEventListener("touchend", lift);
+    frame.addEventListener("touchcancel", lift);
+  }
+  neighbor(delta) {
+    const images = this.images(), index = images.findIndex((item) => item.id === this.itemId);
+    return index >= 0 ? images[index + delta] || null : null;
+  }
+  hasNeighbor(delta) {
+    return !!this.neighbor(delta);
+  }
+  // Is the point on the visible picture (object-fit contain inside the img box, after zoom)?
+  onPicture(clientX, clientY) {
+    const img = this.img, zm = this.zoom, r = this.contentEl.getBoundingClientRect();
+    const w = img.offsetWidth, h = img.offsetHeight, nw = img.naturalWidth || w, nh = img.naturalHeight || h;
+    const fit = Math.min(w / nw, h / nh), pw = nw * fit * zm.scale, ph = nh * fit * zm.scale;
+    const left = r.left + img.offsetLeft + zm.tx + zm.shift + (w - nw * fit) / 2 * zm.scale;
+    const top = r.top + img.offsetTop + zm.ty + (h - nh * fit) / 2 * zm.scale;
+    return clientX >= left && clientX <= left + pw && clientY >= top && clientY <= top + ph;
+  }
+  slideWidth() {
+    return this.contentEl.clientWidth + 16;
+  }
+  // The neighbour on `side` (+1 next, -1 previous; 0 hides it) shown beside the current image,
+  // following zoom.shift; positioned by applyZoom().
+  peekAt(side) {
+    const target = side ? this.neighbor(side) : null;
+    if (!target) {
+      this.peekSide = 0;
+      if (this.peek) this.peek.hidden = true;
+      return;
+    }
+    if (!this.peek) {
+      this.peek = make(this.contentEl.ownerDocument, "img", "gv-original gv-original-peek", this.contentEl);
+      this.peek.draggable = false;
+      this.peek.alt = "";
+    }
+    if (this.peek.dataset.id !== target.id) {
+      this.peek.dataset.id = target.id;
+      this.peek.src = this.plugin.imageURL(target.link, this.ui.sourcePath);
+    }
+    this.peekSide = side;
+    this.peek.hidden = false;
+  }
+  // Swipe switch: the current image slides out and the neighbour slides in together; the real
+  // <img> takes the new picture only once it is decoded, so the hand-over is invisible.
+  async slideTo(side) {
+    const target = this.neighbor(side);
+    if (!target) return;
+    this.sliding = true;
+    this.peekAt(side);
+    const zm = this.zoom, img = this.img, peek = this.peek, width = this.slideWidth();
+    const win = this.contentEl.ownerDocument.defaultView || window;
+    img.classList.add("is-sliding");
+    peek.classList.add("is-sliding");
+    // Starting frame = where the finger left them (no transition yet), then animate.
+    this.applyZoom();
+    void img.offsetWidth;
+    img.style.transform = "translate(" + (zm.tx - side * width) + "px, " + zm.ty + "px) scale(" + zm.scale + ")";
+    peek.style.transform = "translateX(0px)";
+    await new Promise((resolve) => win.setTimeout(resolve, 290));
+    if (this.closed) return;
+    img.classList.remove("is-sliding");
+    img.style.visibility = "hidden";
+    this.itemId = target.id;
+    this.show();
+    try {
+      await img.decode();
+    } catch (_) {
+    }
+    if (this.closed) return;
+    img.style.visibility = "";
+    peek.classList.remove("is-sliding");
+    this.peekAt(0);
+    this.sliding = false;
+    this.moving(false);
+    if (this.ui.root.isConnected) this.ui.select(target.id);
+  }
+  // Remembers which image point is under (clientX, clientY), so it stays there while the scale changes.
+  anchorZoom(clientX, clientY) {
+    const zm = this.zoom, r = this.contentEl.getBoundingClientRect();
+    zm.ux = clientX - r.left - this.img.offsetLeft;
+    zm.uy = clientY - r.top - this.img.offsetTop;
+    zm.qx = (zm.ux - zm.tx) / zm.scale;
+    zm.qy = (zm.uy - zm.ty) / zm.scale;
+  }
+  moving(on) {
+    const win = this.contentEl.ownerDocument.defaultView || window;
+    win.clearTimeout(this.movingTimer);
+    if (on) this.img.classList.add("is-moving");
+    else this.movingTimer = win.setTimeout(() => this.img?.classList.remove("is-moving"), 180);
+  }
+  // Rubber-band / swipe offset back to 0 with a short CSS transition (on) or cancel it (off).
+  settle(on) {
+    const win = this.contentEl.ownerDocument.defaultView || window;
+    win.clearTimeout(this.settleTimer);
+    const els = [this.img, this.peek].filter(Boolean);
+    if (!on) {
+      for (const el of els) el.classList.remove("is-settling");
+      return;
+    }
+    this.zoom.shift = 0;
+    for (const el of els) el.classList.add("is-settling");
+    this.applyZoom();
+    this.settleTimer = win.setTimeout(() => {
+      for (const el of els) el.classList.remove("is-settling");
+      if (!this.sliding) this.peekAt(0);
+    }, 220);
+  }
+  animateZoom() {
+    const zm = this.zoom;
+    this.moving(true);
+    if (zm.raf) return;
+    const win = this.contentEl.ownerDocument.defaultView || window;
+    zm.last = performance.now();
+    const tick = (now) => {
+      zm.raf = 0;
+      const k = 1 - Math.exp(-(now - zm.last) / 55);
+      zm.last = now;
+      zm.z += (zm.target - zm.z) * k;
+      if (Math.abs(zm.target - zm.z) < 1e-3) zm.z = zm.target;
+      zm.scale = Math.exp(zm.z);
+      zm.tx = zm.ux - zm.qx * zm.scale;
+      zm.ty = zm.uy - zm.qy * zm.scale;
+      this.clampZoom();
+      this.applyZoom();
+      if (zm.z !== zm.target) zm.raf = win.requestAnimationFrame(tick);
+      else this.moving(false);
+    };
+    zm.raf = win.requestAnimationFrame(tick);
+  }
+  finishZoom() {
+    const zm = this.zoom;
+    if (!zm.raf) return;
+    (this.contentEl.ownerDocument.defaultView || window).cancelAnimationFrame(zm.raf);
+    zm.raf = 0;
+    zm.z = zm.target;
+    zm.scale = Math.exp(zm.z);
+    zm.tx = zm.ux - zm.qx * zm.scale;
+    zm.ty = zm.uy - zm.qy * zm.scale;
+    this.clampZoom();
+    this.applyZoom();
+    this.moving(false);
+  }
+  // Keeps the visible picture (object-fit: contain inside the img box) covering the frame on an
+  // axis where it is larger than the frame, and centred on an axis where it is smaller.
+  clampZoom() {
+    const zm = this.zoom, img = this.img, frame = this.contentEl;
+    const w = img.offsetWidth, h = img.offsetHeight, nw = img.naturalWidth || w, nh = img.naturalHeight || h;
+    if (!w || !h) return;
+    const fit = Math.min(w / nw, h / nh), pw = nw * fit, ph = nh * fit;
+    const axis = (t, box, pic, offset, size) => {
+      const lead = offset + (box - pic) / 2 * zm.scale, span = pic * zm.scale;
+      if (span <= size) return t + (size - span) / 2 - (lead + t);
+      return Math.min(-lead, Math.max(size - span - lead, t));
+    };
+    zm.tx = axis(zm.tx, w, pw, img.offsetLeft, frame.clientWidth);
+    zm.ty = axis(zm.ty, h, ph, img.offsetTop, frame.clientHeight);
+  }
+  applyZoom() {
+    const zm = this.zoom, zoomed = Math.abs(zm.scale - 1) > 1e-3;
+    // Always the same transform function list (no switch to "none" at 1×), so the transition used
+    // by settle() interpolates and the layer is never rebuilt mid-gesture.
+    this.img.style.transform = zoomed || zm.shift || this.img.classList.contains("is-moving") ? "translate(" + (zm.tx + zm.shift) + "px, " + zm.ty + "px) scale(" + zm.scale + ")" : "";
+    this.contentEl.classList.toggle("is-zoomed", zm.scale > 1.001);
+    if (this.peek && !this.peek.hidden && !this.sliding) this.peek.style.transform = "translateX(" + (this.peekSide * this.slideWidth() + zm.shift) + "px)";
+  }
+  resetZoom() {
+    const zm = this.zoom;
+    if (!zm) return;
+    if (zm.raf) (this.contentEl.ownerDocument.defaultView || window).cancelAnimationFrame(zm.raf);
+    Object.assign(zm, { z: 0, target: 0, scale: 1, tx: 0, ty: 0, hold: 0, raf: 0, shift: 0 });
+    this.settle(false);
+    this.applyZoom();
+    this.moving(false);
   }
   show() {
     const images = this.images();
@@ -378,12 +764,13 @@ var OriginalImageModal = class extends Modal {
       return;
     }
     this.itemId = item.id;
+    this.resetZoom();
     const label = this.plugin.label(item.link);
     this.img.src = this.plugin.imageURL(item.link, this.ui.sourcePath);
     this.img.alt = label;
     this.modalEl.setAttribute("aria-label", label);
     const single = images.length < 2;
-    this.prevButton.hidden = this.nextButton.hidden = single;
+    this.prevButton.hidden = this.nextButton.hidden = single || this.phone;
     this.prevButton.toggleAttribute("disabled", index <= 0);
     this.nextButton.toggleAttribute("disabled", index >= images.length - 1);
     for (const near of [images[index - 1], images[index + 1]]) {
@@ -402,6 +789,14 @@ var OriginalImageModal = class extends Modal {
     if (this.ui.root.isConnected) this.ui.select(target.id);
   }
   onClose() {
+    this.closed = true;
+    this.sliding = false;
+    this.resetZoom();
+    this.peek?.removeAttribute("src");
+    this.peek = null;
+    this.containerEl.removeEventListener("wheel", this.onZoomWheel, { capture: true });
+    (this.contentEl.ownerDocument.defaultView || window).removeEventListener("resize", this.onZoomResize);
+    this.img?.removeAttribute("src");
     this.contentEl.empty();
     this.plugin.modals.delete(this);
   }
@@ -539,13 +934,16 @@ var GalleryUI = class {
       if (this.editing) return;
       stop(event);
       const button = event.target.closest(".gv-thumb");
-      if (!button || !this.cm) return;
+      if (!button) return;
       const itemId = button.dataset.id;
       const item = this.block.model.images.find((entry) => entry.id === itemId);
       const video = item && core.isVideo(item.link);
+      const file = item && obsidian.Platform?.isDesktopApp ? plugin.imageFile(item.link, this.sourcePath) : null;
+      if (!this.cm && !file) return;
       const menu = new Menu();
-      menu.addItem((i) => i.setTitle(t("Insert reference")).setIcon("link").onClick(() => this.plugin.createReference(this, itemId)));
-      menu.addItem((i) => i.setTitle(video ? t("Remove video") : t("Remove image")).setIcon("trash-2").onClick(() => this.plugin.removeImage(this, itemId)));
+      if (this.cm) menu.addItem((i) => i.setTitle(t("Insert reference")).setIcon("link").onClick(() => this.plugin.createReference(this, itemId)));
+      if (file) menu.addItem((i) => i.setTitle(t("Show in system explorer")).setIcon("folder-open").onClick(() => this.plugin.showInSystemExplorer(file)));
+      if (this.cm) menu.addItem((i) => i.setTitle(video ? t("Remove video") : t("Remove image")).setIcon("trash-2").onClick(() => this.plugin.removeImage(this, itemId)));
       menu.showAtMouseEvent(event);
     });
     this.frame.addEventListener("dragover", (event) => {
@@ -855,6 +1253,7 @@ var GalleryUI = class {
     return this.sourcePath + ":" + this.block.model.id;
   }
   render() {
+    this.plugin.resizePending(this);
     const scroll = this.strip.scrollLeft;
     this.strip.replaceChildren();
     for (const item of this.block.model.images) {
@@ -1009,6 +1408,14 @@ var GalleryUI = class {
       delete this.video.dataset.src;
       this.video.load();
     } catch (_) {
+    }
+    // Strip thumbnails are <video preload="metadata">; drop their media pipelines now instead of waiting for GC.
+    for (const v of this.strip?.querySelectorAll?.("video") || []) {
+      try {
+        v.removeAttribute("src");
+        v.load();
+      } catch (_) {
+      }
     }
     this.plugin.uis.delete(this);
     if (this.plugin.dropUI === this) this.plugin.clearDrop();
@@ -1310,12 +1717,13 @@ var GalleryView = class extends Plugin {
     const all = this.scanDoc(ui.cm.state.doc).filter((b) => b.model.id === ui.block.model.id);
     return all.find((b) => b.from === ui.block.from) || (all.length === 1 ? all[0] : null);
   }
-  commit(cm, changes, label = "edit") {
+  commit(cm, changes, label = "edit", history = true) {
     let set = ChangeSet.of(changes, cm.state.doc.length);
     const after = set.apply(cm.state.doc);
     const fixes = core.refFixes(after.toString());
     if (fixes.length) set = set.compose(ChangeSet.of(fixes, after.length));
-    cm.dispatch({ changes: set, annotations: authorized.of(true), userEvent: "input.nsb.gallery." + label });
+    const annotations = history ? authorized.of(true) : [authorized.of(true), Transaction.addToHistory.of(false)];
+    cm.dispatch({ changes: set, annotations, userEvent: "input.nsb.gallery." + label });
   }
   update(ui, model) {
     const block = this.blockFor(ui);
@@ -1395,7 +1803,13 @@ var GalleryView = class extends Plugin {
   // Cached URL only; never starts a decode.
   scaledNow(file, kind) {
     if (!this.scalable(file)) return null;
-    const entry = this.scaled.get(file.path + "|" + (file.stat?.mtime || 0) + "|" + (file.stat?.size || 0));
+    const stamp = file.path + "|" + (file.stat?.mtime || 0) + "|" + (file.stat?.size || 0);
+    const entry = this.scaled.get(stamp);
+    if (entry) {
+      // Keep images that are on screen at the young end of the LRU so eviction never revokes a visible URL.
+      this.scaled.delete(stamp);
+      this.scaled.set(stamp, entry);
+    }
     return entry?.urls[kind] || null;
   }
   pumpDecodes() {
@@ -1617,6 +2031,14 @@ var GalleryView = class extends Plugin {
     wrap.addEventListener("dragstart", stop);
     return wrap;
   }
+  showInSystemExplorer(file) {
+    if (typeof this.app.showInFolder === "function") {
+      this.app.showInFolder(file.path);
+      return;
+    }
+    const full = this.app.vault.adapter.getFullPath?.(file.path);
+    if (full) require("electron").shell.showItemInFolder(full);
+  }
   createReference(ui, itemId) {
     const block = this.blockFor(ui);
     if (!block) return;
@@ -1627,7 +2049,23 @@ var GalleryView = class extends Plugin {
     if (!zone) return;
     const token = core.refToken(block.model.id, itemId, label);
     const doc = cm.state.doc;
-    const end = zone.next ? zone.next.startLine : doc.lines;
+    let end = zone.next ? zone.next.startLine : doc.lines;
+    // Stop at the next Markdown heading: the reference goes at the end of this section,
+    // on the line above that heading. Lines inside fenced code don't count as headings.
+    let fence = null;
+    for (let n = block.endLine + 1; n < end; n++) {
+      const line = doc.line(n + 1).text;
+      const mark = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+      if (mark) {
+        if (!fence) fence = mark[1];
+        else if (mark[1][0] === fence[0] && mark[1].length >= fence.length) fence = null;
+        continue;
+      }
+      if (!fence && /^ {0,3}#{1,6}(?:[ \t]|$)/.test(line)) {
+        end = n;
+        break;
+      }
+    }
     let content = block.endLine;
     for (let n = end - 1; n > block.endLine; n--) if (doc.line(n + 1).text.trim()) {
       content = n;
@@ -1999,10 +2437,10 @@ var GalleryView = class extends Plugin {
     const images = selected || core.imageMatches(snapshot.sliceString(from, to), from);
     const block = this.blockFor(ui);
     if (!block) return true;
-    this.commit(cm, [...images.map((item) => ({ from: item.from, to: item.to, insert: "" })), {
+    this.commit(cm, [...this.takeOut(snapshot, images), {
       from: block.from,
       to: block.to,
-      insert: core.serialize(core.insert(block.model, images.map((i) => i.link), index), block.indent)
+      insert: core.serialize(this.markResize(core.insert(block.model, images.map((i) => i.link), index), block.model), block.indent)
     }], "move-in");
     return true;
   }
@@ -2100,6 +2538,60 @@ var GalleryView = class extends Plugin {
       new Notice(t("Downscaled {n} of {total} images.", { n: done, total: files.size }));
     }).open();
   }
+  // Phones never re-encode images. With "Fit images to the viewer" on, an image added to a gallery
+  // on a phone (dropped file or image moved in from the text) is marked `"resize": true` in the
+  // gallery JSON instead; the next desktop that shows the gallery shrinks the file and clears the mark.
+  markResize(model, before) {
+    if (!obsidian.Platform.isMobile || !this.settings.resizeImages) return model;
+    const old = new Set(before.images.map((item) => item.id));
+    return { ...model, images: model.images.map((item) => old.has(item.id) || core.isVideo(item.link) ? item : { ...item, resize: true }) };
+  }
+  async resizePending(ui) {
+    if (obsidian.Platform.isMobile || !this.settings.resizeImages) return;
+    const items = ui.block.model.images.filter((item) => item.resize);
+    if (!items.length) return;
+    const key = ui.sourcePath + ":" + ui.block.model.id;
+    this.resizing ??= /* @__PURE__ */ new Set();
+    if (this.resizing.has(key)) return;
+    this.resizing.add(key);
+    try {
+      const done = /* @__PURE__ */ new Set();
+      for (const item of items) {
+        const file = this.imageFile(item.link, ui.sourcePath);
+        if (!file) continue; // not synced to this device yet: keep the mark for later
+        try {
+          const result = await this.shrinkImage(await this.app.vault.readBinary(file), file.name);
+          if (result) await this.app.vault.modifyBinary(file, result.data);
+        } catch (error) {
+          console.error("Paipa Gallery:", file.path, error);
+        }
+        done.add(item.id);
+      }
+      if (done.size) await this.clearResizeMarks(ui, done);
+    } finally {
+      this.resizing.delete(key);
+    }
+  }
+  async clearResizeMarks(ui, ids) {
+    const strip = (model) => ({ ...model, images: model.images.map((item) => {
+      if (!ids.has(item.id)) return item;
+      const { resize, ...rest } = item;
+      return rest;
+    }) });
+    const block = ui.cm && ui.root.isConnected ? this.blockFor(ui) : null;
+    if (block) {
+      this.commit(ui.cm, { from: block.from, to: block.to, insert: core.serialize(strip(block.model), block.indent) }, "resize", false);
+      return;
+    }
+    const file = this.app.vault.getAbstractFileByPath(ui.sourcePath);
+    if (!file || typeof file.extension !== "string") return;
+    await this.app.vault.process(file, (text) => {
+      const found = core.scan(text).filter((b) => b.model.id === ui.block.model.id);
+      if (found.length !== 1) return text;
+      const b = found[0];
+      return text.slice(0, b.from) + core.serialize(strip(b.model), b.indent) + text.slice(b.to);
+    });
+  }
   // Where a file dropped into a gallery is created. Section Blocks (if installed
   // and its "Organize media" is on) answers with the note's "<note> media"
   // folder; otherwise Obsidian's own attachment setting decides.
@@ -2140,7 +2632,7 @@ var GalleryView = class extends Plugin {
         if (!core.mediaExtension.test(file.name)) continue;
         const path = await this.attachmentPath(file.name, ui.sourcePath);
         let data = await file.arrayBuffer();
-        if (this.settings.resizeImages) data = (await this.shrinkImage(data, file.name).catch(() => null))?.data || data;
+        if (this.settings.resizeImages && !obsidian.Platform.isMobile) data = (await this.shrinkImage(data, file.name).catch(() => null))?.data || data;
         const attachment = await this.app.vault.createBinary(path, data);
         links.push(this.app.fileManager.generateMarkdownLink(attachment, ui.sourcePath).replace(/^\[/, "!["));
       }
@@ -2152,9 +2644,34 @@ var GalleryView = class extends Plugin {
     }
     const block = this.blockFor(ui);
     if (!block) return;
-    const changes = [{ from: block.from, to: block.to, insert: core.serialize(core.insert(block.model, links, index), block.indent) }];
-    if (origin) changes.push(...origin.images.map((i) => ({ from: i.from, to: i.to, insert: "" })));
+    const changes = [{ from: block.from, to: block.to, insert: core.serialize(this.markResize(core.insert(block.model, links, index), block.model), block.indent) }];
+    if (origin) changes.push(...this.takeOut(snapshot, origin.images));
     this.commit(ui.cm, changes, "drop");
+  }
+  // Deletions for images moved from the text into a gallery. A line left with nothing but
+  // whitespace is removed together with one line break, so moving an image in leaves no blank line.
+  takeOut(doc, images) {
+    const lines = new Map();
+    for (const item of images) {
+      const line = doc.lineAt(item.from);
+      if (!lines.has(line.number)) lines.set(line.number, { line, items: [] });
+      lines.get(line.number).items.push(item);
+    }
+    const changes = [];
+    for (const { line, items } of lines.values()) {
+      let rest = line.text;
+      for (const item of [...items].sort((a, b) => b.from - a.from)) rest = rest.slice(0, item.from - line.from) + rest.slice(Math.min(item.to, line.to) - line.from);
+      if (rest.trim() || items.some((item) => item.to > line.to)) {
+        changes.push(...items.map((item) => ({ from: item.from, to: item.to, insert: "" })));
+      } else if (line.number < doc.lines) {
+        changes.push({ from: line.from, to: line.to + 1, insert: "" });
+      } else if (line.number > 1) {
+        changes.push({ from: line.from - 1, to: line.to, insert: "" });
+      } else {
+        changes.push({ from: line.from, to: line.to, insert: "" });
+      }
+    }
+    return changes;
   }
   outsideSlot(cm, event) {
     if (!cm.dom.contains(cm.dom.ownerDocument.elementFromPoint(event.clientX, event.clientY))) return null;
@@ -2260,8 +2777,8 @@ var GalleryView = class extends Plugin {
         const block = target && this.blockFor(target);
         if (!block) return;
         this.commit(cm, [
-          ...origin.images.map((i) => ({ from: i.from, to: i.to, insert: "" })),
-          { from: block.from, to: block.to, insert: core.serialize(core.insert(block.model, origin.images.map((i) => i.link), index), block.indent) }
+          ...this.takeOut(snapshot, origin.images),
+          { from: block.from, to: block.to, insert: core.serialize(this.markResize(core.insert(block.model, origin.images.map((i) => i.link), index), block.model), block.indent) }
         ], "touch-in");
         return;
       }
@@ -2281,7 +2798,9 @@ var GalleryView = class extends Plugin {
       } else {
         const position = outer.line >= snapshot.lines ? snapshot.length : snapshot.line(outer.line + 1).from;
         if (position > source.from && position < source.to) return;
-        changes.push({ from: position, insert: (position === snapshot.length ? "\n\n" : "") + image.link + "\n\n" });
+        const atEnd = position === snapshot.length;
+        const lead = atEnd && snapshot.length && snapshot.sliceString(position - 1, position) !== "\n" ? "\n" : "";
+        changes.push({ from: position, insert: lead + image.link + (atEnd ? "" : "\n") });
       }
       this.active.set(ui.key(), removed.active);
       this.commit(cm, changes, "move-out");
@@ -2437,7 +2956,7 @@ function jpegDimensions(buffer) {
 GallerySettingTab.SHOW_DEV_SETTINGS = false;
 GalleryView.jpegDimensions = jpegDimensions;
 GalleryView.SCALED = { thumb: 192, hero: 2048 };
-GalleryView.SCALED_CACHE = 400;
+GalleryView.SCALED_CACHE = 120;
 GalleryView.DECODE_CONCURRENCY = 2;
 module.exports = GalleryView;
 module.exports.GalleryUI = GalleryUI;
