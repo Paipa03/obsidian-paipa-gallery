@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.1
+
+- Fix: when a script or another plugin replaces the whole text of an open note (`editor.setValue()`) and the new text has one gallery fewer, the change now goes through. The deletion guard used to block it, and the old note was later saved back over the file. Deleting or cutting a whole gallery by hand is still blocked.
+
 ## 1.7.0
 
 - **Zoom in the full-size viewer**: Ctrl + scroll (or trackpad pinch) zooms around the pointer, only inside the frame; drag to pan. Zoom snaps at the fitted size. No flicker at the edges while zooming.

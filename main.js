@@ -1,5 +1,5 @@
 /*
- * Paipa Gallery 1.7.0 - by paipa, MIT License
+ * Paipa Gallery 1.7.1 - by paipa, MIT License
  * https://github.com/Paipa03/obsidian-paipa-gallery
  *
  * UI inspired by the Lite Gallery plugin.
@@ -1709,6 +1709,13 @@ var GalleryView = class extends Plugin {
     // (another app, a script, Sync). The file already holds that text, so blocking it
     // would leave a stale editor that later saves the old gallery back over the edit.
     if (/^(undo|redo|set)(\.|$)/.test(event)) return tr;
+    // editor.setValue() from a script or another plugin: the whole document replaced,
+    // no userEvent. It is a complete new version of the note, like "set" above.
+    if (!event) {
+      let count = 0, whole = false;
+      tr.changes.iterChanges((fromA, toA) => { count++; whole = fromA === 0 && toA === tr.startState.doc.length; });
+      if (count === 1 && whole) return tr;
+    }
     if (!core.preserved(this.textOf(tr.startState.doc), this.textOf(tr.newDoc))) return [];
     return tr;
   }
