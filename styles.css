@@ -87,12 +87,13 @@
 .gv-modal-container .modal-bg { background: #000; opacity: .8; }
 /* Fixed-size viewer: the frame and its arrows never move while paging; each image is fitted inside. */
 .gv-modal-container .gv-modal { box-sizing: border-box; display: flex; flex-direction: column; width: 94vw; max-width: 94vw; height: 94vh; max-height: 94vh; padding: 36px 16px 16px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); }
-.gv-original-caption { flex: 0 0 auto; display: flex; align-items: baseline; justify-content: center; gap: 8px; min-width: 0; padding: 10px 12px 0; font-size: var(--font-ui-small); line-height: 1.45; color: var(--text-muted); }
+/* Fixed-height strip (1 line desktop, 2 lines phone) so the image frame never moves when titles differ. */
+.gv-original-caption { flex: 0 0 auto; box-sizing: border-box; height: calc(1.45em + 10px); overflow: hidden; display: flex; align-items: baseline; justify-content: center; gap: 8px; min-width: 0; padding: 10px 12px 0; font-size: var(--font-ui-small); line-height: 1.45; color: var(--text-muted); }
 .gv-original-figure { flex: 0 0 auto; font-weight: 600; font-variant-numeric: tabular-nums; }
 .gv-original-title { min-width: 0; color: var(--text-normal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gv-original-title:empty { display: none; }
-body.is-mobile .gv-modal-container.is-phone-viewer .gv-original-caption { padding: 10px 8px 0; color: rgba(255, 255, 255, .72); text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }
-body.is-mobile .gv-modal-container.is-phone-viewer .gv-original-title { color: #fff; white-space: normal; }
+body.is-mobile .gv-modal-container.is-phone-viewer .gv-original-caption { height: calc(2.9em + 10px); padding: 10px 8px 0; color: rgba(255, 255, 255, .72); text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }
+body.is-mobile .gv-modal-container.is-phone-viewer .gv-original-title { color: #fff; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .gv-viewer-host { position: relative; }
 .modal-container.gv-modal-container.is-pane-viewer { position: absolute; inset: 0; z-index: 30; outline: none; }
 .gv-modal-container.is-pane-viewer .gv-modal { width: 94%; max-width: 94%; height: 94%; max-height: 94%; }

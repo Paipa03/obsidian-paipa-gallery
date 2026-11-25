@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.4
+
+- **The image no longer moves with the title**: the title line under the full-size image now has a fixed height (one line on desktop, two on phones; longer titles end in "…"), so the picture stays exactly in place when you page between images with titles of different lengths.
+
 ## 1.7.3
 
 - **Titles in the full-size viewer**: the figure number and the image's title from the gallery now show in a line centred under the picture, and follow along as you page. Long titles are cut short with "…" on desktop (hover for the full text) and wrap on phones.
