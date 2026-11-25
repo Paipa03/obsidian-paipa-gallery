@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.5
+
+- **Full titles in the full-size viewer**: titles are no longer cut short. A title that fits on one line looks as before, under the image. A longer one is shown in full on a layer that grows upward over the bottom of the picture, with a backdrop so it stays readable. The image never moves or resizes because of the title, on desktop or on phones.
+
 ## 1.7.4
 
 - **The image no longer moves with the title**: the title line under the full-size image now has a fixed height (one line on desktop, two on phones; longer titles end in "…"), so the picture stays exactly in place when you page between images with titles of different lengths.

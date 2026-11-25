@@ -87,13 +87,18 @@
 .gv-modal-container .modal-bg { background: #000; opacity: .8; }
 /* Fixed-size viewer: the frame and its arrows never move while paging; each image is fitted inside. */
 .gv-modal-container .gv-modal { box-sizing: border-box; display: flex; flex-direction: column; width: 94vw; max-width: 94vw; height: 94vh; max-height: 94vh; padding: 36px 16px 16px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); }
-/* Fixed-height strip (1 line desktop, 2 lines phone) so the image frame never moves when titles differ. */
-.gv-original-caption { flex: 0 0 auto; box-sizing: border-box; height: calc(1.45em + 10px); overflow: hidden; display: flex; align-items: baseline; justify-content: center; gap: 8px; min-width: 0; padding: 10px 12px 0; font-size: var(--font-ui-small); line-height: 1.45; color: var(--text-muted); }
+/* Fixed one-line bar so the image frame never moves when titles differ. The text
+   is a layer anchored to the bar's bottom: a longer title is shown in full and grows upward over the image. */
+.gv-original-caption { flex: 0 0 auto; position: relative; z-index: 2; box-sizing: border-box; height: calc(1.45em + 10px); font-size: var(--font-ui-small); line-height: 1.45; color: var(--text-muted); pointer-events: none; }
+.gv-original-caption-layer { position: absolute; left: 0; right: 0; bottom: 0; box-sizing: border-box; display: flex; align-items: baseline; justify-content: center; gap: 8px; min-width: 0; padding: 10px 12px 0; }
+.gv-original-caption.is-overflow .gv-original-caption-layer { padding: 8px 12px 2px; border-radius: var(--radius-s, 4px) var(--radius-s, 4px) 0 0; background: color-mix(in srgb, var(--background-primary) 90%, transparent); }
 .gv-original-figure { flex: 0 0 auto; font-weight: 600; font-variant-numeric: tabular-nums; }
-.gv-original-title { min-width: 0; color: var(--text-normal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gv-original-title { min-width: 0; color: var(--text-normal); white-space: pre-wrap; overflow-wrap: anywhere; }
 .gv-original-title:empty { display: none; }
-body.is-mobile .gv-modal-container.is-phone-viewer .gv-original-caption { height: calc(2.9em + 10px); padding: 10px 8px 0; color: rgba(255, 255, 255, .72); text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }
-body.is-mobile .gv-modal-container.is-phone-viewer .gv-original-title { color: #fff; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+body.is-mobile .gv-modal-container.is-phone-viewer .gv-original-caption { color: rgba(255, 255, 255, .72); text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }
+body.is-mobile .gv-modal-container.is-phone-viewer .gv-original-caption-layer { padding: 10px 8px 0; }
+body.is-mobile .gv-modal-container.is-phone-viewer .gv-original-caption.is-overflow .gv-original-caption-layer { padding: 8px 8px 2px; background: rgba(0, 0, 0, .6); }
+body.is-mobile .gv-modal-container.is-phone-viewer .gv-original-title { color: #fff; }
 .gv-viewer-host { position: relative; }
 .modal-container.gv-modal-container.is-pane-viewer { position: absolute; inset: 0; z-index: 30; outline: none; }
 .gv-modal-container.is-pane-viewer .gv-modal { width: 94%; max-width: 94%; height: 94%; max-height: 94%; }

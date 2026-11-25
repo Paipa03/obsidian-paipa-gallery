@@ -386,7 +386,7 @@ var OriginalImageModal = class extends Modal {
     if (RO) {
       this.paneResize = new RO(() => {
         this.paneCheck();
-        if (!this.closed) this.resetZoom();
+        if (!this.closed) this.onZoomResize();
       });
       this.paneResize.observe(host);
     }
@@ -429,9 +429,12 @@ var OriginalImageModal = class extends Modal {
     this.prevButton = arrow("prev", "chevron-left", t("Previous"), -1);
     this.nextButton = arrow("next", "chevron-right", t("Next"), 1);
     // Figure number and title from the gallery, under the image; read-only, follows paging.
+    // The bar keeps a fixed height in the layout; the text sits on a layer anchored to its bottom
+    // and grows upward over the image when the title needs more lines, so the image never moves.
     this.captionBar = make(doc, "div", "gv-original-caption", this.modalEl);
-    this.captionFigure = make(doc, "span", "gv-original-figure", this.captionBar);
-    this.captionTitle = make(doc, "span", "gv-original-title", this.captionBar);
+    this.captionLayer = make(doc, "div", "gv-original-caption-layer", this.captionBar);
+    this.captionFigure = make(doc, "span", "gv-original-figure", this.captionLayer);
+    this.captionTitle = make(doc, "span", "gv-original-title", this.captionLayer);
     this.scope.register([], "ArrowLeft", () => (this.step(-1), false));
     this.scope.register([], "ArrowRight", () => (this.step(1), false));
     this.setupZoom();
@@ -510,7 +513,10 @@ var OriginalImageModal = class extends Modal {
     };
     frame.addEventListener("mousedown", this.onPanDown);
     this.setupTouch(MAX);
-    this.onZoomResize = () => this.resetZoom();
+    this.onZoomResize = () => {
+      this.resetZoom();
+      this.fitCaption();
+    };
     win.addEventListener("resize", this.onZoomResize);
     this.img.addEventListener("load", () => this.resetZoom());
   }
@@ -835,7 +841,7 @@ var OriginalImageModal = class extends Modal {
     this.modalEl.setAttribute("aria-label", item.caption || label);
     this.captionFigure.textContent = figureText(core.figureLabel(this.ui.block.model, item.id));
     this.captionTitle.textContent = item.caption || "";
-    this.captionTitle.title = item.caption || "";
+    this.fitCaption();
     const single = images.length < 2;
     this.prevButton.hidden = this.nextButton.hidden = single || this.phone;
     this.prevButton.toggleAttribute("disabled", index <= 0);
@@ -843,6 +849,11 @@ var OriginalImageModal = class extends Modal {
     for (const near of [images[index - 1], images[index + 1]]) {
       if (near) new Image().src = this.plugin.imageURL(near.link, this.ui.sourcePath);
     }
+  }
+  // Backdrop only while the text overflows the bar onto the image; a title that fits looks as before.
+  fitCaption() {
+    if (!this.captionLayer) return;
+    this.captionBar.classList.toggle("is-overflow", this.captionLayer.offsetHeight > this.captionBar.clientHeight + 1);
   }
   step(delta) {
     const images = this.images(), index = images.findIndex((item) => item.id === this.itemId);
