@@ -428,6 +428,10 @@ var OriginalImageModal = class extends Modal {
     };
     this.prevButton = arrow("prev", "chevron-left", t("Previous"), -1);
     this.nextButton = arrow("next", "chevron-right", t("Next"), 1);
+    // Figure number and title from the gallery, under the image; read-only, follows paging.
+    this.captionBar = make(doc, "div", "gv-original-caption", this.modalEl);
+    this.captionFigure = make(doc, "span", "gv-original-figure", this.captionBar);
+    this.captionTitle = make(doc, "span", "gv-original-title", this.captionBar);
     this.scope.register([], "ArrowLeft", () => (this.step(-1), false));
     this.scope.register([], "ArrowRight", () => (this.step(1), false));
     this.setupZoom();
@@ -828,7 +832,10 @@ var OriginalImageModal = class extends Modal {
     const label = this.plugin.label(item.link);
     this.img.src = this.plugin.imageURL(item.link, this.ui.sourcePath);
     this.img.alt = label;
-    this.modalEl.setAttribute("aria-label", label);
+    this.modalEl.setAttribute("aria-label", item.caption || label);
+    this.captionFigure.textContent = figureText(core.figureLabel(this.ui.block.model, item.id));
+    this.captionTitle.textContent = item.caption || "";
+    this.captionTitle.title = item.caption || "";
     const single = images.length < 2;
     this.prevButton.hidden = this.nextButton.hidden = single || this.phone;
     this.prevButton.toggleAttribute("disabled", index <= 0);
@@ -858,6 +865,7 @@ var OriginalImageModal = class extends Modal {
     (this.contentEl.ownerDocument.defaultView || window).removeEventListener("resize", this.onZoomResize);
     this.img?.removeAttribute("src");
     this.contentEl.empty();
+    this.captionBar?.remove();
     if (this.host) this.unmountFromPane();
     this.plugin.modals.delete(this);
   }

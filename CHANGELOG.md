@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.3
+
+- **Titles in the full-size viewer**: the figure number and the image's title from the gallery now show in a line centred under the picture, and follow along as you page. Long titles are cut short with "…" on desktop (hover for the full text) and wrap on phones.
+
 ## 1.7.2
 
 - **Full-size viewer stays in its pane** (desktop): the viewer now covers only the pane that holds the gallery instead of the whole window. With split panes, only that pane is dimmed; the other panes keep working normally. Esc and ← / → act on the viewer only while you are in it; elsewhere they behave as usual. The viewer follows the pane's size and closes when the pane is closed or switches to another note. Hover popovers and phones are unchanged.
