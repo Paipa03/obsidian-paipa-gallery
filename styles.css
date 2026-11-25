@@ -87,6 +87,9 @@
 .gv-modal-container .modal-bg { background: #000; opacity: .8; }
 /* Fixed-size viewer: the frame and its arrows never move while paging; each image is fitted inside. */
 .gv-modal-container .gv-modal { box-sizing: border-box; display: flex; flex-direction: column; width: 94vw; max-width: 94vw; height: 94vh; max-height: 94vh; padding: 36px 16px 16px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); }
+.gv-viewer-host { position: relative; }
+.modal-container.gv-modal-container.is-pane-viewer { position: absolute; inset: 0; z-index: 30; outline: none; }
+.gv-modal-container.is-pane-viewer .gv-modal { width: 94%; max-width: 94%; height: 94%; max-height: 94%; }
 .gv-modal .modal-content { position: relative; flex: 1 1 auto; min-height: 0; width: 100%; margin: 0; padding: 0; overflow: hidden; display: flex; justify-content: center; align-items: center; }
 .gv-original { display: block; width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; transform-origin: 0 0; }
 /* Ctrl + wheel zoom: only the image moves; the frame clips what overflows. Drag pans while zoomed in. */

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.2
+
+- **Full-size viewer stays in its pane** (desktop): the viewer now covers only the pane that holds the gallery instead of the whole window. With split panes, only that pane is dimmed; the other panes keep working normally. Esc and ← / → act on the viewer only while you are in it; elsewhere they behave as usual. The viewer follows the pane's size and closes when the pane is closed or switches to another note. Hover popovers and phones are unchanged.
+
 ## 1.7.1
 
 - Fix: when a script or another plugin replaces the whole text of an open note (`editor.setValue()`) and the new text has one gallery fewer, the change now goes through. The deletion guard used to block it, and the old note was later saved back over the file. Deleting or cutting a whole gallery by hand is still blocked.

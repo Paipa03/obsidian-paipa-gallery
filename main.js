@@ -341,12 +341,72 @@ var OriginalImageModal = class extends Modal {
   applyFit() {
     this.modalEl.classList.toggle("is-fit", !!this.plugin.settings.resizeImages);
   }
+  // Desktop: the viewer lives inside the pane that holds the gallery, not over the whole window, so
+  // with split panes only that pane is dimmed and the other panes keep working. Its keys (Esc, ← / →)
+  // only act while focus is inside the viewer; the modal's window-wide key scope is dropped.
+  // Without a workspace pane (hover popover, phone) it stays a normal full-window modal.
+  open() {
+    this.phone = !!obsidian.Platform?.isMobile;
+    const host = this.phone ? null : this.ui.root.closest(".workspace-leaf");
+    this.host = host && !host.closest(".popover, .modal") ? host : null;
+    super.open();
+    if (this.host) this.app.keymap?.popScope?.(this.scope);
+  }
+  mountInPane() {
+    const host = this.host, el = this.containerEl;
+    host.classList.add("gv-viewer-host");
+    host.appendChild(el);
+    el.classList.add("is-pane-viewer");
+    el.tabIndex = -1;
+    this.leaf = null;
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      if (leaf.containerEl === host) this.leaf = leaf;
+    });
+    this.leafPath = this.leaf?.view?.file?.path;
+    this.onPaneKey = (event) => {
+      if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key === "Escape") this.close();
+      else if (event.key === "ArrowLeft") this.step(-1);
+      else if (event.key === "ArrowRight") this.step(1);
+      else return;
+      stop(event);
+    };
+    this.onPaneFocus = () => {
+      if (!el.contains(el.ownerDocument.activeElement)) el.focus({ preventScroll: true });
+    };
+    el.addEventListener("keydown", this.onPaneKey);
+    el.addEventListener("pointerdown", this.onPaneFocus, true);
+    // Close when the pane goes away or shows another note; refit the image when the pane is resized.
+    this.paneCheck = () => {
+      if (this.closed) return;
+      if (!host.isConnected || !el.isConnected || this.leaf && this.leaf.view?.file?.path !== this.leafPath) this.close();
+    };
+    this.paneEvents = ["layout-change", "file-open"].map((name) => this.app.workspace.on(name, () => setTimeout(this.paneCheck, 0)));
+    const RO = el.ownerDocument.defaultView?.ResizeObserver || window.ResizeObserver;
+    if (RO) {
+      this.paneResize = new RO(() => {
+        this.paneCheck();
+        if (!this.closed) this.resetZoom();
+      });
+      this.paneResize.observe(host);
+    }
+    el.focus({ preventScroll: true });
+  }
+  unmountFromPane() {
+    for (const ref of this.paneEvents || []) this.app.workspace.offref(ref);
+    this.paneEvents = null;
+    this.paneResize?.disconnect();
+    this.paneResize = null;
+    this.containerEl.removeEventListener("keydown", this.onPaneKey);
+    this.containerEl.removeEventListener("pointerdown", this.onPaneFocus, true);
+    if (![...this.plugin.modals].some((m) => m !== this && m.host === this.host)) this.host.classList.remove("gv-viewer-host");
+  }
   onOpen() {
     this.plugin.modals.add(this);
     this.containerEl.classList.add("gv-modal-container");
     this.modalEl.classList.add("gv-modal");
+    if (this.host) this.mountInPane();
     // Phone: no panel and no arrows; the picture itself is the window, swipe to page.
-    this.phone = !!obsidian.Platform?.isMobile;
     this.containerEl.classList.toggle("is-phone-viewer", this.phone);
     this.applyFit();
     const close = this.modalEl.querySelector(".modal-close-button, .modal-header-button");
@@ -798,6 +858,7 @@ var OriginalImageModal = class extends Modal {
     (this.contentEl.ownerDocument.defaultView || window).removeEventListener("resize", this.onZoomResize);
     this.img?.removeAttribute("src");
     this.contentEl.empty();
+    if (this.host) this.unmountFromPane();
     this.plugin.modals.delete(this);
   }
 };
