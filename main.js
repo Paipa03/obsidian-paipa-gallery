@@ -1,5 +1,5 @@
 /*
- * Paipa Gallery 1.7.1 - by paipa, MIT License
+ * Paipa Gallery 1.8.0 - by paipa, MIT License
  * https://github.com/Paipa03/obsidian-paipa-gallery
  *
  * UI inspired by the Lite Gallery plugin.
@@ -72,7 +72,15 @@ var PAIPA_I18N_ZH = {
   "No images to downscale in this note.": "本笔记的 Gallery 里没有可缩小的图片。",
   "{n} images in this note's galleries will be checked. Those larger than {long} × {short} px are replaced with a smaller copy. The original files are overwritten, and other notes that embed them change too. This can't be undone.": "将检查本笔记 Gallery 里的 {n} 张图片，大于 {long} × {short} px 的会被替换为缩小版。原文件会被覆盖，引用这些图片的其他笔记也会跟着变，无法撤销。",
   "Downscaling images…": "正在缩小图片…",
-  "Downscaled {n} of {total} images.": "已缩小 {n} / {total} 张图片。"
+  "Downscaled {n} of {total} images.": "已缩小 {n} / {total} 张图片。",
+  "Search figure titles": "搜索图标题",
+  "to navigate": "选择",
+  "to jump": "跳转",
+  "to close": "关闭",
+  "Gallery {n}": "Gallery {n}",
+  "This gallery": "当前 Gallery",
+  "No matching titles": "没有匹配的标题",
+  "No titled figures in this note": "本笔记还没有带标题的图"
 };
 var paipaLang = "auto";
 function paipaObsidianLang() {
@@ -946,6 +954,7 @@ var GalleryUI = class {
     this.frame = make(this.doc, "section", "gv", this.root);
     this.frame.setAttribute("aria-label", t("Gallery"));
     this.frame.setAttribute("role", "region");
+    this.buildSearch();
     const stage = make(this.doc, "div", "gv-stage", this.frame);
     this.previous = this.button(stage, "chevron-left", t("Previous"), () => this.navigate(-1));
     const center = make(this.doc, "div", "gv-center", stage);
@@ -1011,7 +1020,7 @@ var GalleryUI = class {
       this.strip.scrollLeft += delta * (event.deltaMode === 1 ? 24 : event.deltaMode === 2 ? this.strip.clientWidth : 1);
     }, { passive: false });
     this.frame.addEventListener("contextmenu", (event) => {
-      if (this.editing) return;
+      if (this.editing || event.target.closest(".gv-search")) return;
       stop(event);
       const button = event.target.closest(".gv-thumb");
       if (!button) return;
@@ -1323,6 +1332,232 @@ var GalleryUI = class {
       return;
     }
     this.renderCaption();
+  }
+  // ---- figure title search (desktop; hidden on mobile by CSS) -------------
+  // A quiet icon in the top-left corner (inside the left arrow column, so it never
+  // covers the picture) grows into a small field. It lists the titled figures of
+  // every gallery in this note; Enter / click jumps to that gallery and figure.
+  buildSearch() {
+    const doc = this.doc;
+    this.searchBox = make(doc, "div", "gv-search", this.frame);
+    const field = this.searchField = make(doc, "div", "gv-search-field", this.searchBox);
+    const icon = this.searchToggle = make(doc, "button", "gv-search-icon clickable-icon", field);
+    icon.type = "button";
+    icon.setAttribute("aria-label", t("Search figure titles"));
+    setIcon(icon, "search");
+    const input = this.searchInput = make(doc, "input", "gv-search-input", field);
+    input.type = "search";
+    input.spellcheck = false;
+    input.placeholder = t("Search figure titles");
+    input.tabIndex = -1;
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-expanded", "false");
+    input.setAttribute("aria-autocomplete", "list");
+    this.searchCount = make(doc, "span", "gv-search-count", field);
+    this.searchCount.setAttribute("aria-hidden", "true");
+    const panel = this.searchPanel = make(doc, "div", "gv-search-panel", this.searchBox);
+    panel.hidden = true;
+    this.searchList = make(doc, "div", "gv-search-results", panel);
+    this.searchList.setAttribute("role", "listbox");
+    const hint = make(doc, "div", "gv-search-hint", panel);
+    for (const [keys, text] of [["↑↓", t("to navigate")], ["↵", t("to jump")], ["esc", t("to close")]]) {
+      const part = make(doc, "span", "", hint);
+      make(doc, "kbd", "", part).textContent = keys;
+      part.append(" " + text);
+    }
+    this.searchResults = [];
+    this.searchIndex = 0;
+    icon.addEventListener("click", (event) => {
+      stop(event);
+      if (this.searchOpen) this.closeSearch();
+      else this.openSearch();
+    });
+    // Keep every key and pointer event to ourselves: the editor, the gallery's own
+    // arrow / Delete keys and the block drag handlers must not see them.
+    for (const type of ["keyup", "keypress", "beforeinput", "input", "paste", "cut", "copy", "compositionstart", "compositionupdate", "compositionend"]) {
+      input.addEventListener(type, (event) => event.stopPropagation());
+    }
+    for (const type of ["mousedown", "pointerdown", "click", "dblclick", "dragstart"]) {
+      this.searchBox.addEventListener(type, (event) => event.stopPropagation());
+    }
+    input.addEventListener("input", () => this.refreshSearch());
+    input.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.isComposing || event.keyCode === 229) return;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        this.moveSearch(event.key === "ArrowDown" ? 1 : -1);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        const hit = this.searchResults[this.searchIndex];
+        if (hit) this.jumpToHit(hit);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        this.closeSearch(true);
+      }
+    });
+    input.addEventListener("blur", () => {
+      this.doc.defaultView.setTimeout(() => {
+        if (this.searchOpen && !this.searchBox.contains(this.doc.activeElement)) this.closeSearch();
+      }, 0);
+    });
+    // Rows take the click without taking focus from the field.
+    this.searchList.addEventListener("mousedown", (event) => event.preventDefault());
+    this.searchList.addEventListener("mousemove", (event) => {
+      const row = event.target.closest(".gv-search-item");
+      if (row) this.setSearchIndex(Number(row.dataset.index), false);
+    });
+    this.searchList.addEventListener("click", (event) => {
+      const row = event.target.closest(".gv-search-item");
+      const hit = row && this.searchResults[Number(row.dataset.index)];
+      if (hit) this.jumpToHit(hit);
+    });
+  }
+  openSearch() {
+    if (this.searchOpen) return;
+    this.searchOpen = true;
+    this.searchField.classList.add("is-open");
+    this.searchBox.classList.add("is-open");
+    this.searchToggle.setAttribute("aria-expanded", "true");
+    this.searchInput.tabIndex = 0;
+    this.searchInput.setAttribute("aria-expanded", "true");
+    this.searchInput.value = this.plugin.lastSearch || "";
+    this.searchEntries = null;
+    this.loadSearchEntries().then(() => {
+      if (this.searchOpen) this.refreshSearch();
+    });
+    this.searchInput.focus();
+    this.searchInput.select();
+  }
+  closeSearch(returnFocus = false) {
+    if (!this.searchOpen) return;
+    this.searchOpen = false;
+    this.searchField.classList.remove("is-open");
+    this.searchBox.classList.remove("is-open");
+    this.searchToggle.setAttribute("aria-expanded", "false");
+    this.searchInput.tabIndex = -1;
+    this.searchInput.setAttribute("aria-expanded", "false");
+    this.searchPanel.hidden = true;
+    this.searchCount.textContent = "";
+    if (this.doc.activeElement === this.searchInput) {
+      this.searchInput.blur();
+      if (returnFocus) this.cm ? this.cm.focus() : this.searchToggle.focus();
+    }
+  }
+  // Every titled figure of the note, in document order. The editor reads its live
+  // text (scan is cached per Text); reading view reads the file.
+  async loadSearchEntries() {
+    const app = this.plugin.app;
+    let blocks;
+    if (this.cm) blocks = this.plugin.scanDoc(this.cm.state.doc);
+    else {
+      const file = app.vault.getAbstractFileByPath(this.sourcePath);
+      blocks = file && typeof file.extension === "string" ? core.scan(await app.vault.cachedRead(file)) : [this.block];
+    }
+    const headings = app.metadataCache.getCache(this.sourcePath)?.headings || [];
+    const entries = [];
+    blocks.forEach((block, n) => {
+      let where = null;
+      for (const h of headings) if (h.position.start.line < block.startLine) where = h.heading;
+      for (const item of block.model.images) {
+        if (!item.caption) continue;
+        entries.push({
+          galleryId: block.model.id,
+          itemId: item.id,
+          line: block.startLine,
+          label: figureText(core.figureLabel(block.model, item.id)),
+          caption: item.caption,
+          lower: item.caption.toLowerCase(),
+          where: where || t("Gallery {n}", { n: n + 1 }),
+          here: block.model.id === this.block.model.id
+        });
+      }
+    });
+    this.searchEntries = entries;
+  }
+  refreshSearch() {
+    if (!this.searchOpen) return;
+    if (this.cm) this.loadSearchEntries();
+    const entries = this.searchEntries || [];
+    const query = this.searchInput.value;
+    this.plugin.lastSearch = query;
+    const terms = [...new Set(query.toLowerCase().split(/\s+/).filter(Boolean))];
+    const results = terms.length ? entries.filter((e) => terms.every((term) => e.lower.includes(term))) : entries;
+    this.searchResults = results.slice(0, 100);
+    this.searchIndex = 0;
+    const list = this.searchList;
+    list.replaceChildren();
+    this.searchResults.forEach((hit, index) => {
+      const row = make(this.doc, "div", "gv-search-item", list);
+      row.dataset.index = String(index);
+      row.id = "gv-search-" + this.block.model.id + "-" + index;
+      row.setAttribute("role", "option");
+      make(this.doc, "span", "gv-search-figure", row).textContent = hit.label;
+      this.highlight(make(this.doc, "span", "gv-search-title", row), hit.caption, terms);
+      const where = make(this.doc, "span", "gv-search-where", row);
+      where.textContent = hit.here ? t("This gallery") : hit.where;
+    });
+    if (!this.searchResults.length) {
+      make(this.doc, "div", "gv-search-empty", list).textContent = entries.length ? t("No matching titles") : t("No titled figures in this note");
+    }
+    this.searchCount.textContent = terms.length && entries.length ? String(results.length) : "";
+    // Fit the list inside the frame (it clips): field top 12 + height 32 + gap 6, 12 below.
+    list.style.maxHeight = Math.max(72, this.frame.clientHeight - 12 - 32 - 6 - 12 - 30) + "px";
+    this.searchPanel.hidden = false;
+    this.setSearchIndex(0, true);
+  }
+  highlight(el, text, terms) {
+    const lower = text.toLowerCase(), marks = [];
+    for (const term of terms) {
+      for (let at = lower.indexOf(term); at >= 0; at = lower.indexOf(term, at + term.length)) marks.push([at, at + term.length]);
+    }
+    marks.sort((a, b) => a[0] - b[0]);
+    let pos = 0;
+    for (const [from, to] of marks) {
+      if (to <= pos) continue;
+      const start = Math.max(from, pos);
+      if (start > pos) el.append(text.slice(pos, start));
+      make(this.doc, "span", "gv-search-hit", el).textContent = text.slice(start, to);
+      pos = to;
+    }
+    if (pos < text.length) el.append(text.slice(pos));
+  }
+  moveSearch(delta) {
+    const n = this.searchResults.length;
+    if (n) this.setSearchIndex((this.searchIndex + delta + n) % n, true);
+  }
+  setSearchIndex(index, scroll) {
+    this.searchIndex = index;
+    let current = null;
+    for (const row of this.searchList.children) {
+      const on = Number(row.dataset.index) === index && row.classList.contains("gv-search-item");
+      row.classList.toggle("is-selected", on);
+      row.setAttribute("aria-selected", String(on));
+      if (on) current = row;
+    }
+    if (current) this.searchInput.setAttribute("aria-activedescendant", current.id);
+    else this.searchInput.removeAttribute("aria-activedescendant");
+    if (current && scroll) current.scrollIntoView({ block: "nearest" });
+  }
+  jumpToHit(hit) {
+    this.closeSearch();
+    this.plugin.revealFigure(this, hit.galleryId, hit.itemId, hit.line);
+  }
+  // A short accent ring around the frame and a highlight on the title, so the eye
+  // finds where the jump landed.
+  flash() {
+    if (this.doc.defaultView.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    for (const a of this.frame.getAnimations()) a.cancel();
+    this.frame.animate([
+      { boxShadow: "0 0 0 2px color-mix(in srgb, var(--gv-accent) 70%, transparent)" },
+      { boxShadow: "0 0 0 2px color-mix(in srgb, var(--gv-accent) 70%, transparent)", offset: 0.45 },
+      { boxShadow: "0 0 0 2px transparent" }
+    ], { duration: 1400, easing: "ease-out" });
+    this.captionText.animate([
+      { backgroundColor: "var(--text-highlight-bg)" },
+      { backgroundColor: "var(--text-highlight-bg)", offset: 0.5 },
+      { backgroundColor: "transparent" }
+    ], { duration: 1600, easing: "ease-out" });
   }
   // ---- rendering ----------------------------------------------------------
   current() {
@@ -2184,6 +2419,38 @@ var GalleryView = class extends Plugin {
     const ui = [...this.uis].find((entry) => entry.cm === cm && entry.block.model.id === galleryId && entry.root.isConnected);
     if (!ui || !this.mostlyVisible(ui.frame, cm.scrollDOM)) cm.dispatch({ effects: EditorView.scrollIntoView(block.from, { y: "start", yMargin: 12 }) });
     ui?.select(itemId);
+  }
+  // Jump from a gallery's search box to a figure of the same note: the target
+  // gallery scrolls into view (only when it isn't already), shows the figure and
+  // flashes. A gallery outside the viewport may not exist yet (editor widgets and
+  // reading-view sections are built lazily), so it is looked up over a few frames.
+  revealFigure(from, galleryId, itemId, line) {
+    this.active.set(from.sourcePath + ":" + galleryId, itemId);
+    const container = from.cm ? null : from.root.closest(".markdown-preview-view, .markdown-reading-view") || from.root.parentElement;
+    const target = () => [...this.uis].find((ui) => ui.root.isConnected && ui.block.model.id === galleryId && ui.sourcePath === from.sourcePath && (from.cm ? ui.cm === from.cm : !ui.cm && !!container?.contains(ui.root)));
+    if (from.cm) this.goToFigure(from.cm, galleryId, itemId);
+    else {
+      const ui = target();
+      if (ui) {
+        if (!this.mostlyVisible(ui.frame, container)) ui.frame.scrollIntoView({ block: "start", behavior: "smooth" });
+      } else {
+        let view = null;
+        this.app.workspace.iterateAllLeaves((leaf) => {
+          if (!view && leaf.view?.containerEl?.contains(from.root)) view = leaf.view;
+        });
+        view?.previewMode?.applyScroll?.(line);
+      }
+    }
+    const win = from.doc.defaultView;
+    let tries = 0;
+    const land = () => {
+      const ui = target();
+      if (ui) {
+        if (!from.cm) ui.select(itemId);
+        ui.flash();
+      } else if (++tries < 20) win.requestAnimationFrame(land);
+    };
+    win.requestAnimationFrame(land);
   }
   goToFigureInPreview(el, galleryId, itemId, sourcePath) {
     const container = el.closest(".workspace-leaf-content, .markdown-preview-view, .modal, .popover");

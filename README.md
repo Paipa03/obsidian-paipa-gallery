@@ -11,6 +11,7 @@
 - **On phones**: the viewer is just the picture. Swipe to the next / previous image with a sliding animation, pinch to zoom, drag to pan, tap outside the picture to close.
 - **Reorder by dragging thumbnails.** Drag a thumbnail out to put the image back in the note; drag images in from the note or your file manager.
 - **Figures and captions**: items are numbered `Figure 1, 2…` automatically. Double-click the label to add a caption.
+- **Search captions** (desktop): the search icon in a gallery's top-left corner finds figures by caption across all galleries in the note and jumps to the one you pick.
 - **Figure references**: right-click a thumbnail → **Insert reference** adds a button at the end of the gallery's section (above the next heading) that jumps to that figure. Numbers update when you reorder. The same menu has **Show in system explorer**.
 - **Videos** (mp4, webm, mov…): play / pause, seek, volume, speed.
 - **Fast with large photos**: the block shows small copies made on the fly; the original loads only in the full-size viewer.

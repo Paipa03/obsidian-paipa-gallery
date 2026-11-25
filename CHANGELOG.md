@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.0
+
+- **Search figure titles** (desktop): hover a gallery and a small search icon appears in its top-left corner. Click it to search the titles of every figure in the note's galleries. Matches are highlighted; use ↑ / ↓ and Enter (or click) to jump to that gallery and figure, Esc to close. Works in editing and reading view.
+
 ## 1.7.5
 
 - **Full titles in the full-size viewer**: titles are no longer cut short. A title that fits on one line looks as before, under the image. A longer one is shown in full on a layer that grows upward over the bottom of the picture, with a backdrop so it stays readable. The image never moves or resizes because of the title, on desktop or on phones.
