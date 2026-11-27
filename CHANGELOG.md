@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.0.0
+
+- **Galleries stay put**: jumping to a search result, picking a thumbnail, paging or following a figure reference no longer scrolls a gallery that is already on screen. A gallery off screen is scrolled to the middle of the pane instead of the top. Opening the search box or editing a title no longer scrolls the note.
+- **Zoom survives switching tabs**: a zoomed viewer or image tab keeps its zoom and position when you switch to another tab in the same pane and back. Resizing the pane still resets it.
+
+- **Every image in a note opens in the viewer**: click any image in a note, even outside a gallery (tap on phones), to open it in the same full-size viewer, with its file name under the picture. The pointer turns into a magnifier over these images. Modifier-clicks, linked images and tiny inline images keep their usual behaviour. Turn it on in settings with **Gallery behaviour for note images** (off by default; when off, note images behave exactly as in Obsidian).
+- **Drag the viewer into its own tab** (desktop): the strip at the top of the viewer drags like a tab. Drop it on a tab bar for a new tab, on a pane edge for a split, or outside the window for a new window. The file and the gallery stay as they are. Double-click the strip to open the image in a new tab. The strip keeps clear of the close button, and its hint appears only after the pointer rests on it.
+- **Image tabs look and zoom like the viewer**: an image opened this way (or dragged straight from a note onto a tab bar or pane edge) shows its caption or file name under the picture, and zooms with Ctrl + scroll around the pointer; drag to pan.
+- Hovering a gallery, its main image or the viewer no longer pops up a text tooltip.
+- **Drag a note image straight into a tab** (desktop): dragging an image in a note works like dragging a tab, to a tab bar, a pane edge or out of the window. Dropping it on a gallery still moves it into the gallery.
+- **Originals are kept**: "Fit images to the viewer" is now two settings. **Fill the viewer frame** only changes the display. **Shrink large images when adding** replaces files and is off by default; after updating it starts off, so galleries stop overwriting originals.
+- **Sharper main image**: the gallery's main image is made at the size this device's screens need (up to 4096 px) instead of a fixed 2048 px.
+- **Faster viewer**: the viewer shows the gallery's main image at once and switches to the original as soon as it is loaded, without a flash and without resetting the zoom.
+- **Previews kept on this device**: thumbnails and main images are kept in the app's own storage (outside the vault, so no sync tool copies them), and galleries no longer re-read every original after a restart. Set the size limit or clear it under **Keep previews on this device**; uninstalling the plugin deletes them.
+
 ## 1.8.0
 
 - **Search figure titles** (desktop): hover a gallery and a small search icon appears in its top-left corner. Click it to search the titles of every figure in the note's galleries. Matches are highlighted; use ↑ / ↓ and Enter (or click) to jump to that gallery and figure, Esc to close. Works in editing and reading view.

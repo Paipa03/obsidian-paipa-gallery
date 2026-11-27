@@ -1,5 +1,5 @@
 /*
- * Paipa Gallery 1.8.0 - by paipa, MIT License
+ * Paipa Gallery 2.0.0 - by paipa, MIT License
  * https://github.com/Paipa03/obsidian-paipa-gallery
  *
  * UI inspired by the Lite Gallery plugin.
@@ -11,6 +11,17 @@
 // Never used for document syntax (gallery-view JSON, gv-ref tokens, "Figure N" written into notes).
 var PAIPA_I18N_ZH = {
   "Language": "语言",
+  "Gallery behaviour for note images": "笔记图片使用 Gallery 交互",
+  "Images outside galleries behave like gallery images: click (tap on phones) opens the full-size viewer, the pointer shows a magnifier, and dragging an image works like dragging a tab. When off, note images behave exactly as in Obsidian.": "让 Gallery 之外的图片也用 Gallery 的交互：点击（手机上轻点）打开原图窗口，鼠标悬停显示放大镜，拖动图片像拖标签页一样。关闭时，笔记图片完全按 Obsidian 原本的方式工作。",
+  "Fill the viewer frame": "原图窗口铺满画框",
+  "The full-size viewer fills its frame with every image, enlarging smaller ones. Display only: files are never changed.": "原图窗口里每张图都铺满画框，较小的图会被放大。只影响显示，从不改动文件。",
+  "Shrink large images when adding": "加图时缩小大图",
+  "Replaces the files: large images dropped into a gallery are saved at the size the viewer needs on your largest screen (currently {long} × {short} px, long × short side), and only the smaller copy is kept. Images added on a phone are shrunk the next time the note is opened on a computer. Off by default, so galleries keep your originals.": "会替换文件：拖进 Gallery 的大图按原图窗口在你最大的屏幕上所需的尺寸保存（当前为 {long} × {short} px，长边 × 短边），只保留缩小后的版本；手机上加的图在下次用电脑打开该笔记时缩小。默认关闭，Gallery 保留你的原图。",
+  "Keep previews on this device": "在本机保留预览图",
+  "Gallery thumbnails and main images are small copies made from your originals. Keeping them in this device's app storage (outside the vault, never synced) makes galleries load at once after a restart. Originals are never changed.": "Gallery 的缩略图和主图是从原图缩出来的小副本。把它们存在本机的应用存储里（在库外、不会被任何同步方案同步），重启后 Gallery 也能立刻显示。原图从不改动。",
+  "Preview storage limit": "预览图占用上限",
+  "Oldest previews are removed past this size. In use: {size}.": "超过这个大小时先删最久没用的预览图。当前占用：{size}。",
+  "Clear": "清空",
   "Follow Obsidian's language, or choose one for this plugin.": "跟随 Obsidian 的语言，或为本插件单独选择。",
   "Follow Obsidian": "跟随 Obsidian",
   "Close original image": "关闭原图",
@@ -63,8 +74,6 @@ var PAIPA_I18N_ZH = {
   "Figure label vertical offset": "图引用文字垂直偏移",
   "Nudges the text inside figure reference buttons. Positive moves it down. Unit: px.": "微调图引用按钮内文字的上下位置。正值向下移。单位：px。",
   "Reset": "重置",
-  "Fit images to the viewer": "图片适应窗口",
-  "The full-size viewer fills its frame with every image, enlarging smaller ones; this applies to images already in galleries as soon as it is turned on. Large images dropped into a gallery are saved at the size the viewer needs on your largest screen (currently {long} × {short} px, long × short side), and only the smaller copy is stored. For large images already in a note, use the command \"Downscale images in this note's galleries\".": "原图窗口里的每张图都铺满画框，较小的图会被放大；打开后对 Gallery 里已有的图立即生效。拖进 Gallery 的大图按原图窗口在你最大的屏幕上所需的尺寸保存（当前为 {long} × {short} px，长边 × 短边），只存缩小后的版本。笔记里已有的大图，用命令「缩小本笔记 Gallery 里的图片」处理。",
   "Downscale images in this note's galleries": "缩小本笔记 Gallery 里的图片",
   "Downscale images": "缩小图片",
   "Downscale": "缩小",
@@ -80,7 +89,8 @@ var PAIPA_I18N_ZH = {
   "Gallery {n}": "Gallery {n}",
   "This gallery": "当前 Gallery",
   "No matching titles": "没有匹配的标题",
-  "No titled figures in this note": "本笔记还没有带标题的图"
+  "No titled figures in this note": "本笔记还没有带标题的图",
+  "Drag to a tab bar or pane edge \xB7 double-click for a new tab": "拖到标签栏或窗格边缘 \xB7 双击在新标签页打开"
 };
 var paipaLang = "auto";
 function paipaObsidianLang() {
@@ -304,7 +314,7 @@ var require_core = __commonJS({
 // plugin.js
 var obsidian = require("obsidian");
 var { Plugin, MarkdownRenderChild, Menu, Modal, Notice, setIcon, editorInfoField, editorLivePreviewField, PluginSettingTab, Setting } = obsidian;
-var DEFAULT_SETTINGS = { devMode: false, refOffset: -2, language: "auto", resizeImages: false, screenBox: null };
+var DEFAULT_SETTINGS = { devMode: false, refOffset: -2, language: "auto", fillViewer: false, shrinkOnAdd: false, screenBox: null, noteImages: false, previewCache: true, previewCacheMB: 500 };
 var { EditorState, StateField, StateEffect, Annotation, Transaction, Prec, ChangeSet } = require("@codemirror/state");
 var { EditorView, WidgetType, Decoration } = require("@codemirror/view");
 var core = require_core();
@@ -344,10 +354,115 @@ var OriginalImageModal = class extends Modal {
   images() {
     return this.ui.block.model.images.filter((item) => !core.isVideo(item.link));
   }
+  // Gallery items resolve their link; a note image (ui.loose) carries its own src and file.
+  urlOf(item) {
+    return item.src || this.plugin.imageURL(item.link, this.ui.sourcePath);
+  }
+  fileOf(item) {
+    return item ? item.file || this.plugin.imageFile(item.link, this.ui.sourcePath) : null;
+  }
+  // ---- drag bar (desktop) -------------------------------------------------
+  // The strip across the top of the viewer drags like a tab header: drop it on a tab bar
+  // for a new tab, on a pane edge for a split, or outside the window for a new window. It
+  // hands Obsidian's own tab drag (workspace.onDragLeaf) a real leaf that shows the image
+  // file in Obsidian's image view; the leaf waits in a tab group parked off-screen until
+  // the drop moves it into the workspace. The file itself never moves.
+  // The bar stops short of the close button (its own strip on the right), so reaching for ✕
+  // never lights it up. Its hint is not a tooltip: it fades in beside the grip only after
+  // the pointer has rested on the bar for a while, never while a button is held or a drag
+  // runs, and not again in this session once the user has dragged an image out.
+  buildDragBar(doc) {
+    const bar = this.dragBar = make(doc, "div", "gv-original-bar", this.modalEl);
+    make(doc, "span", "gv-original-grip", bar).setAttribute("aria-hidden", "true");
+    const hint = make(doc, "span", "gv-original-bar-hint", bar);
+    hint.textContent = t("Drag to a tab bar or pane edge \xB7 double-click for a new tab");
+    bar.draggable = true;
+    const win = doc.defaultView || window;
+    const hideHint = () => {
+      win.clearTimeout(this.hintTimer);
+      bar.classList.remove("show-hint");
+    };
+    const armHint = (event) => {
+      hideHint();
+      if (this.plugin.dragHintRetired || event.buttons) return;
+      this.hintTimer = win.setTimeout(() => {
+        if (!doc.body.classList.contains("is-grabbing")) bar.classList.add("show-hint");
+      }, 1200);
+    };
+    this.hideHint = hideHint;
+    bar.addEventListener("pointerenter", armHint);
+    bar.addEventListener("pointermove", (event) => {
+      if (!bar.classList.contains("show-hint")) armHint(event);
+    });
+    bar.addEventListener("pointerleave", hideHint);
+    bar.addEventListener("pointerdown", (event) => {
+      hideHint();
+      if (event.button === 0) this.prepareLeaf();
+    });
+    bar.addEventListener("dragstart", (event) => {
+      hideHint();
+      const leaf = this.prepareLeaf();
+      if (!leaf || typeof this.app.workspace.onDragLeaf !== "function") {
+        event.preventDefault();
+        return;
+      }
+      event.stopPropagation();
+      try {
+        this.app.workspace.onDragLeaf(event, leaf);
+      } catch (error) {
+        console.error(error);
+        event.preventDefault();
+        return;
+      }
+      bar.addEventListener("dragend", () => setTimeout(() => this.afterLeafDrag(leaf), 0), { once: true });
+    });
+    bar.addEventListener("dblclick", (event) => {
+      stop(event);
+      const state = this.leafState();
+      if (!state) return;
+      this.close();
+      this.app.workspace.getLeaf("tab").setViewState({ type: VIEW_IMAGE, state, active: true });
+    });
+  }
+  // What the image tab shows under the picture: the gallery's figure label and caption, or the file name.
+  leafState() {
+    const item = this.currentItem(), file = this.fileOf(item);
+    if (!file) return null;
+    const figure = this.ui.loose ? file.name : figureText(core.figureLabel(this.ui.block.model, item.id));
+    return { file: file.path, figure, caption: item.caption || "" };
+  }
+  currentItem() {
+    return this.images().find((item) => item.id === this.itemId) || null;
+  }
+  prepareLeaf() {
+    const state = this.leafState();
+    if (!state) return null;
+    if (this.parked && this.parked.path === state.file && this.parked.leaf.parent === this.parked.tabs) return this.parked.leaf;
+    this.disposeLeaf();
+    this.parked = this.plugin.parkImageLeaf(this.modalEl.ownerDocument, (this.host || this.modalEl).getBoundingClientRect(), state);
+    return this.parked?.leaf || null;
+  }
+  afterLeafDrag(leaf) {
+    const parked = this.parked;
+    if (!parked || parked.leaf !== leaf) return;
+    if (leaf.parent === parked.tabs) return;
+    // Dropped into the workspace: the parked group is empty now; the viewer's job is done.
+    parked.tabs.containerEl.remove();
+    this.parked = null;
+    this.plugin.dragHintRetired = true;
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
+    this.app.workspace.requestSaveLayout?.();
+    this.close();
+  }
+  disposeLeaf() {
+    const parked = this.parked;
+    this.parked = null;
+    this.plugin.releaseParked(parked);
+  }
   // Read on every open and on every toggle of the setting, so images already in
   // galleries follow it at once; nothing is cached per image.
   applyFit() {
-    this.modalEl.classList.toggle("is-fit", !!this.plugin.settings.resizeImages);
+    this.modalEl.classList.toggle("is-fit", !!this.plugin.settings.fillViewer);
   }
   // Desktop: the viewer lives inside the pane that holds the gallery, not over the whole window, so
   // with split panes only that pane is dimmed and the other panes keep working. Its keys (Esc, ← / →)
@@ -443,6 +558,7 @@ var OriginalImageModal = class extends Modal {
     this.captionLayer = make(doc, "div", "gv-original-caption-layer", this.captionBar);
     this.captionFigure = make(doc, "span", "gv-original-figure", this.captionLayer);
     this.captionTitle = make(doc, "span", "gv-original-title", this.captionLayer);
+    if (!this.phone) this.buildDragBar(doc);
     this.scope.register([], "ArrowLeft", () => (this.step(-1), false));
     this.scope.register([], "ArrowRight", () => (this.step(1), false));
     this.setupZoom();
@@ -521,12 +637,28 @@ var OriginalImageModal = class extends Modal {
     };
     frame.addEventListener("mousedown", this.onPanDown);
     this.setupTouch(MAX);
+    // Only a real change of the frame's size resets the zoom: a hidden tab measures 0 × 0 and comes
+    // back at the same size, so switching tabs in the pane keeps the zoom.
+    this.zoomBox = "";
     this.onZoomResize = () => {
-      this.resetZoom();
+      const w = frame.clientWidth, h = frame.clientHeight;
+      if (!w || !h) return;
+      const box = w + "x" + h;
+      if (box === this.zoomBox) return;
+      const first = !this.zoomBox;
+      this.zoomBox = box;
+      if (!first) this.resetZoom();
       this.fitCaption();
     };
     win.addEventListener("resize", this.onZoomResize);
-    this.img.addEventListener("load", () => this.resetZoom());
+    // The swap from the kept main image to the original (progressiveSrc) keeps the current zoom.
+    this.img.addEventListener("load", () => {
+      if (this.keepZoom) {
+        this.keepZoom = false;
+        return;
+      }
+      this.resetZoom();
+    });
   }
   setupTouch(MAX) {
     const frame = this.contentEl;
@@ -695,7 +827,7 @@ var OriginalImageModal = class extends Modal {
     }
     if (this.peek.dataset.id !== target.id) {
       this.peek.dataset.id = target.id;
-      this.peek.src = this.plugin.imageURL(target.link, this.ui.sourcePath);
+      this.peek.src = this.urlOf(target);
     }
     this.peekSide = side;
     this.peek.hidden = false;
@@ -843,19 +975,26 @@ var OriginalImageModal = class extends Modal {
     }
     this.itemId = item.id;
     this.resetZoom();
-    const label = this.plugin.label(item.link);
-    this.img.src = this.plugin.imageURL(item.link, this.ui.sourcePath);
+    const label = item.name || this.plugin.label(item.link);
+    this.plugin.progressiveSrc(this, this.fileOf(item), this.urlOf(item));
     this.img.alt = label;
-    this.modalEl.setAttribute("aria-label", item.caption || label);
-    this.captionFigure.textContent = figureText(core.figureLabel(this.ui.block.model, item.id));
+    // Named by the caption line (aria-labelledby), not aria-label, which Obsidian would pop up as a tooltip.
+    this.captionLayer.id ||= "gv-viewer-caption-" + Math.random().toString(36).slice(2, 8);
+    this.modalEl.setAttribute("aria-labelledby", this.captionLayer.id);
+    // A note image has no figure number: its file name takes that place.
+    this.captionFigure.textContent = this.ui.loose ? label : figureText(core.figureLabel(this.ui.block.model, item.id));
     this.captionTitle.textContent = item.caption || "";
     this.fitCaption();
+    if (this.dragBar) {
+      this.dragBar.hidden = !this.fileOf(item);
+      if (this.parked && this.parked.path !== this.fileOf(item)?.path) this.disposeLeaf();
+    }
     const single = images.length < 2;
     this.prevButton.hidden = this.nextButton.hidden = single || this.phone;
     this.prevButton.toggleAttribute("disabled", index <= 0);
     this.nextButton.toggleAttribute("disabled", index >= images.length - 1);
     for (const near of [images[index - 1], images[index + 1]]) {
-      if (near) new Image().src = this.plugin.imageURL(near.link, this.ui.sourcePath);
+      if (near) new Image().src = this.urlOf(near);
     }
   }
   // Backdrop only while the text overflows the bar onto the image; a title that fits looks as before.
@@ -885,10 +1024,111 @@ var OriginalImageModal = class extends Modal {
     this.img?.removeAttribute("src");
     this.contentEl.empty();
     this.captionBar?.remove();
+    this.hideHint?.();
+    this.dragBar?.remove();
+    this.disposeLeaf();
     if (this.host) this.unmountFromPane();
     this.plugin.modals.delete(this);
   }
 };
+// An image in a tab of its own (dragged out of the viewer or out of a note): the viewer's
+// look and its zoom — Ctrl + wheel about the pointer, drag to pan — instead of a plain file
+// page. The zoom code is the viewer's own, shared method by method (it only needs
+// contentEl as the frame, img, containerEl and zoom). State: file, plus the figure label
+// and caption to show under the picture.
+var VIEW_IMAGE = "paipa-gallery-image";
+var IMAGE_FILE = /^(avif|bmp|gif|jpe?g|png|svg|webp)$/i;
+var PaipaImageView = class extends obsidian.FileView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.navigation = true;
+    this.phone = false;
+    this.figure = "";
+    this.caption = "";
+  }
+  getViewType() {
+    return VIEW_IMAGE;
+  }
+  getIcon() {
+    return "image";
+  }
+  getDisplayText() {
+    return this.file ? this.file.name : t("Image");
+  }
+  canAcceptExtension(extension) {
+    return IMAGE_FILE.test(extension);
+  }
+  getState() {
+    return { ...super.getState(), figure: this.figure, caption: this.caption };
+  }
+  async setState(state, result) {
+    this.figure = state?.figure || "";
+    this.caption = state?.caption || "";
+    await super.setState(state, result);
+    this.renderCaption();
+  }
+  build() {
+    if (this.img) return;
+    const doc = this.containerEl.ownerDocument;
+    this.containerEl.classList.add("gv-image-view");
+    this.contentEl.classList.add("gv-image-frame");
+    this.img = make(doc, "img", "gv-original", this.contentEl);
+    this.img.draggable = false;
+    this.img.addEventListener("dragstart", stop);
+    this.captionBar = make(doc, "div", "gv-original-caption", this.containerEl);
+    this.captionLayer = make(doc, "div", "gv-original-caption-layer", this.captionBar);
+    this.captionFigure = make(doc, "span", "gv-original-figure", this.captionLayer);
+    this.captionTitle = make(doc, "span", "gv-original-title", this.captionLayer);
+    this.setupZoom();
+  }
+  async onLoadFile(file) {
+    this.build();
+    this.closed = false;
+    this.item = { id: "file", link: "", src: this.app.vault.getResourcePath(file), file, name: file.name };
+    this.itemId = "file";
+    this.containerEl.classList.toggle("is-fit", !!this.plugin.settings.fillViewer);
+    this.resetZoom();
+    this.plugin.progressiveSrc(this, file, this.item.src);
+    this.img.alt = file.name;
+    this.renderCaption();
+  }
+  async onUnloadFile() {
+    this.img?.removeAttribute("src");
+  }
+  images() {
+    return this.item ? [this.item] : [];
+  }
+  urlOf(item) {
+    return item.src;
+  }
+  renderCaption() {
+    if (!this.captionFigure) return;
+    this.captionFigure.textContent = this.figure || this.file?.name || "";
+    this.captionTitle.textContent = this.caption;
+    this.fitCaption();
+  }
+  applyFit() {
+    this.containerEl.classList.toggle("is-fit", !!this.plugin.settings.fillViewer);
+  }
+  onResize() {
+    this.onZoomResize?.();
+  }
+  show() {
+  }
+  close() {
+  }
+  async onClose() {
+    this.closed = true;
+    this.containerEl.removeEventListener("wheel", this.onZoomWheel, { capture: true });
+    (this.containerEl.ownerDocument.defaultView || window).removeEventListener("resize", this.onZoomResize);
+    this.img?.removeAttribute("src");
+    await super.onClose();
+  }
+};
+for (const name of ["setupZoom", "setupTouch", "neighbor", "hasNeighbor", "onPicture", "slideWidth", "peekAt", "slideTo", "anchorZoom", "moving", "settle", "animateZoom", "finishZoom", "clampZoom", "applyZoom", "resetZoom", "fitCaption"]) {
+  PaipaImageView.prototype[name] = OriginalImageModal.prototype[name];
+}
 var GalleryWidget = class extends WidgetType {
   constructor(plugin, block) {
     super();
@@ -952,7 +1192,7 @@ var GalleryUI = class {
     this.root.galleryUI = this;
     this.root.contentEditable = "false";
     this.frame = make(this.doc, "section", "gv", this.root);
-    this.frame.setAttribute("aria-label", t("Gallery"));
+    // No aria-label: Obsidian would pop it up as a "Gallery" tooltip over the whole block.
     this.frame.setAttribute("role", "region");
     this.buildSearch();
     const stage = make(this.doc, "div", "gv-stage", this.frame);
@@ -960,7 +1200,9 @@ var GalleryUI = class {
     const center = make(this.doc, "div", "gv-center", stage);
     this.hero = make(this.doc, "button", "gv-hero", center);
     this.hero.type = "button";
-    this.hero.setAttribute("aria-label", t("View original image"));
+    // Named by hidden text, not aria-label: Obsidian shows every aria-label as a hover tooltip,
+    // and the zoom-in cursor already says the picture opens.
+    make(this.doc, "span", "gv-sr-only", this.hero).textContent = t("View original image");
     this.heroImage = make(this.doc, "img", "gv-hero-image", this.hero);
     this.heroImage.draggable = false;
     this.heroImage.decoding = "async";
@@ -1067,6 +1309,7 @@ var GalleryUI = class {
     plugin.uis.add(this);
     this.render();
     this.observer = new this.doc.defaultView.ResizeObserver(() => {
+      this.plugin.noteHeroBox(this.hero);
       this.fillSlots();
       this.cm?.requestMeasure();
     });
@@ -1308,7 +1551,7 @@ var GalleryUI = class {
     }
     if (el.contentEditable !== "plaintext-only") el.contentEditable = "true";
     el.spellcheck = false;
-    el.focus();
+    el.focus({ preventScroll: true });
     const win = this.doc.defaultView, range = this.doc.createRange();
     range.selectNodeContents(el);
     range.collapse(false);
@@ -1426,7 +1669,7 @@ var GalleryUI = class {
     this.loadSearchEntries().then(() => {
       if (this.searchOpen) this.refreshSearch();
     });
-    this.searchInput.focus();
+    this.searchInput.focus({ preventScroll: true });
     this.searchInput.select();
   }
   closeSearch(returnFocus = false) {
@@ -1441,7 +1684,7 @@ var GalleryUI = class {
     this.searchCount.textContent = "";
     if (this.doc.activeElement === this.searchInput) {
       this.searchInput.blur();
-      if (returnFocus) this.cm ? this.cm.focus() : this.searchToggle.focus();
+      if (returnFocus) this.cm ? this.cm.contentDOM.focus({ preventScroll: true }) : this.searchToggle.focus({ preventScroll: true });
     }
   }
   // Every titled figure of the note, in document order. The editor reads its live
@@ -1736,11 +1979,151 @@ var GalleryUI = class {
     if (this.plugin.dropUI === this) this.plugin.clearDrop();
   }
 };
+// Previews kept on this device: the scaled thumbnail / main image of each original, in IndexedDB.
+// That is the app's own storage, outside the vault, so no sync tool (Obsidian Sync, Remotely Save,
+// iCloud, Git, Syncthing) ever copies it, and nobody has to pick a folder. One database per vault
+// (app.appId). Key = path | mtime | size, so an edited original simply misses and gets a new entry;
+// stale ones age out. Oldest-used entries are removed past the size limit in the settings.
+// Any failure (private storage off, quota) just means decoding as before.
+var PreviewStore = class {
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.name = "paipa-gallery-previews-" + (plugin.app.appId || "vault");
+    this.opening = null;
+    this.trimTimer = 0;
+  }
+  enabled() {
+    return this.plugin.settings.previewCache !== false && typeof indexedDB !== "undefined";
+  }
+  open() {
+    if (this.opening) return this.opening;
+    this.opening = new Promise((resolve) => {
+      let request;
+      try {
+        request = indexedDB.open(this.name, 1);
+      } catch (_) {
+        resolve(null);
+        return;
+      }
+      request.onupgradeneeded = () => request.result.createObjectStore("previews", { keyPath: "key" }).createIndex("used", "used");
+      request.onsuccess = () => {
+        this.db = request.result;
+        this.db.onversionchange = () => this.db.close();
+        resolve(this.db);
+      };
+      request.onerror = request.onblocked = () => resolve(null);
+    });
+    return this.opening;
+  }
+  async run(mode, work) {
+    const db = await this.open();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      let result = null;
+      try {
+        const tx = db.transaction("previews", mode);
+        work(tx.objectStore("previews"), (value) => {
+          result = value;
+        });
+        tx.oncomplete = () => resolve(result);
+        tx.onerror = tx.onabort = () => resolve(null);
+      } catch (_) {
+        resolve(null);
+      }
+    });
+  }
+  // Marks the entry as used at most once an hour, so reading stays a read most of the time.
+  get(key) {
+    if (!this.enabled()) return Promise.resolve(null);
+    return this.run("readwrite", (store, done) => {
+      const request = store.get(key);
+      request.onsuccess = () => {
+        const record = request.result || null;
+        done(record);
+        if (record && Date.now() - (record.used || 0) > 36e5) store.put({ ...record, used: Date.now() });
+      };
+    });
+  }
+  async put(record) {
+    if (!this.enabled()) return;
+    await this.run("readwrite", (store) => store.put({ ...record, used: Date.now() }));
+    clearTimeout(this.trimTimer);
+    this.trimTimer = setTimeout(() => this.trim(), 5e3);
+  }
+  async usage() {
+    let total = 0;
+    await this.run("readonly", (store) => {
+      const cursor = store.openCursor();
+      cursor.onsuccess = () => {
+        const c = cursor.result;
+        if (!c) return;
+        total += c.value.bytes || 0;
+        c.continue();
+      };
+    });
+    return total;
+  }
+  async trim() {
+    const limit = (Number(this.plugin.settings.previewCacheMB) || 500) * 1048576;
+    let total = await this.usage();
+    if (total <= limit) return;
+    await this.run("readwrite", (store) => {
+      const cursor = store.index("used").openCursor();
+      cursor.onsuccess = () => {
+        const c = cursor.result;
+        if (!c || total <= limit * 0.9) return;
+        total -= c.value.bytes || 0;
+        c.delete();
+        c.continue();
+      };
+    });
+  }
+  clear() {
+    return this.run("readwrite", (store) => store.clear());
+  }
+  close() {
+    clearTimeout(this.trimTimer);
+    this.db?.close();
+  }
+  // Obsidian has no uninstall hook: onunload runs on disable, update and uninstall alike, and only an
+  // uninstall then deletes the plugin folder. So a few seconds after unloading, a missing manifest
+  // means "uninstalled" and the database goes too. Disabling or updating keeps it; quitting the app
+  // never gets this far. The timer is a plain closure, so it still runs after the plugin is gone.
+  dropIfUninstalled(adapter, manifestPath) {
+    const name = this.name;
+    setTimeout(async () => {
+      try {
+        if (await adapter.exists(manifestPath)) return;
+        indexedDB.deleteDatabase(name);
+      } catch (_) {
+      }
+    }, 4e3);
+  }
+};
 var GalleryView = class extends Plugin {
   async onload() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const stored = await this.loadData() || {};
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
+    // 1.9.0 split "Fit images to the viewer" (resizeImages) into display (fillViewer) and file
+    // shrinking (shrinkOnAdd). Display carries over; shrinking starts off, so originals are kept.
+    // Pre-release builds of 1.9.0 stored openNoteImages (on by default); the option is now noteImages, off by default.
+    if ("openNoteImages" in stored) {
+      delete this.settings.openNoteImages;
+      await this.saveData(this.settings);
+    }
+    if ("resizeImages" in stored) {
+      if (!("fillViewer" in stored)) this.settings.fillViewer = !!stored.resizeImages;
+      delete this.settings.resizeImages;
+      await this.saveData(this.settings);
+    }
+    this.previews = new PreviewStore(this);
     paipaLang = this.settings.language || "auto";
     this.addSettingTab(new GallerySettingTab(this.app, this));
+    this.registerView(VIEW_IMAGE, (leaf) => new PaipaImageView(leaf, this));
+    this.applyNoteImageClass();
+    // A note image dragged natively onto a tab bar or pane edge opens in Obsidian's image
+    // view; turn that new leaf into the image tab, the same as dragging it out of the viewer.
+    this.registerEvent(this.app.workspace.on("layout-change", () => this.adoptDraggedImage()));
     this.uis = /* @__PURE__ */ new Set();
     this.textCache = /* @__PURE__ */ new WeakMap();
     this.scanCache = /* @__PURE__ */ new WeakMap();
@@ -1827,6 +2210,12 @@ var GalleryView = class extends Plugin {
     for (const ui of this.uis) ui.updateCurrent();
   }
   onunload() {
+    this.previews?.close();
+    if (this.manifest?.dir) this.previews?.dropIfUninstalled(this.app.vault.adapter, this.manifest.dir + "/manifest.json");
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      leaf.view?.containerEl?.ownerDocument.body.classList.remove("gv-note-images");
+    });
+    document.body.classList.remove("gv-note-images");
     for (const entry of this.scaled.values()) for (const url of Object.values(entry.urls)) if (String(url).startsWith("blob:")) URL.revokeObjectURL(url);
     this.scaled.clear();
     for (const d of this.docs instanceof WeakSet ? [document] : []) d.body?.style.removeProperty("--gv-ref-offset");
@@ -1879,7 +2268,172 @@ var GalleryView = class extends Plugin {
         if (event.pointerType === "touch" && this.touchTarget(event.target)) stop(event);
       }, true);
       this.registerDomEvent(doc, "touchstart", (event) => this.startTouch(event), { capture: true, passive: false });
+      this.registerDomEvent(doc, "click", (event) => this.onNoteImageClick(event), true);
+      this.registerDomEvent(doc, "dragstart", (event) => this.trackImageDrag(event), true);
+      this.registerDomEvent(doc, "dragend", () => {
+        if (this.imageDrag) this.imageDrag.until = Date.now() + 1500;
+      }, true);
+      this.registerDomEvent(doc, "touchstart", (event) => this.noteImageTouchStart(event), { capture: true, passive: true });
+      this.registerDomEvent(doc, "touchend", (event) => this.noteImageTouchEnd(event), { capture: true, passive: false });
     }
+    this.applyNoteImageClass();
+  }
+  // ---- note images in the viewer ------------------------------------------
+  // Any image in a note (outside galleries) opens in the same full-size viewer, with its
+  // file name in place of the figure number. Links, buttons, bookmark cards, canvas and
+  // tiny inline images keep their own behaviour.
+  noteImage(target) {
+    if (!this.settings.noteImages || !target?.closest) return null;
+    // startTouch's tap clicks the embed span itself, not the <img> inside it.
+    const img = target.closest("img") || target.closest(".internal-embed.image-embed")?.querySelector("img");
+    if (!img || !img.closest(".markdown-preview-view, .markdown-rendered, .cm-content")) return null;
+    if (img.closest(".gv-block, .gv-modal-container, a, button, .wb-card, .canvas-node, .modal")) return null;
+    const r = img.getBoundingClientRect();
+    if (r.width < 40 && r.height < 40) return null;
+    return img;
+  }
+  // Zoom-in cursor on note images while the feature is on (CSS keys off this body class).
+  applyNoteImageClass() {
+    const on = !!this.settings.noteImages && !obsidian.Platform?.isMobile;
+    const docs = new Set([document]);
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      if (leaf.view?.containerEl) docs.add(leaf.view.containerEl.ownerDocument);
+    });
+    for (const d of docs) d.body?.classList.toggle("gv-note-images", on);
+  }
+  trackImageDrag(event) {
+    this.imageDrag = null;
+    const img = this.noteImage(event.target);
+    if (!img) return;
+    const leafEl = img.closest(".workspace-leaf");
+    let sourcePath = "";
+    if (leafEl) this.app.workspace.iterateAllLeaves((leaf) => {
+      if (leaf.containerEl === leafEl) sourcePath = leaf.view?.file?.path || "";
+    });
+    const file = this.noteImageFile(img, sourcePath);
+    if (!file) return;
+    const known = new Set();
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      known.add(leaf);
+    });
+    const alt = (img.getAttribute("alt") || "").trim(), tail = alt.split(/[\\/]/).pop();
+    const caption = alt && tail !== file.name && tail !== file.basename && alt !== img.closest(".internal-embed")?.getAttribute("src") && !/^\d+(x\d+)?$/i.test(alt) ? alt : "";
+    // Desktop: the drag becomes a tab drag, exactly like dragging a note's tab header (tab bar →
+    // new tab, pane edge → split, outside → window), ending in the same image tab as the viewer's
+    // drag bar. A gallery still takes the image: its frame handles the drag before the workspace.
+    const ws = this.app.workspace;
+    if (!obsidian.Platform?.isMobile && typeof ws.onDragLeaf === "function") {
+      const host = img.closest(".workspace-leaf") || img.ownerDocument.body;
+      const parked = this.parkImageLeaf(img.ownerDocument, host.getBoundingClientRect(), { file: file.path, figure: file.name, caption });
+      if (parked) {
+        event.stopPropagation();
+        try {
+          ws.onDragLeaf(event, parked.leaf);
+        } catch (error) {
+          console.error(error);
+          this.releaseParked(parked);
+          return;
+        }
+        event.target.addEventListener("dragend", () => setTimeout(() => {
+          if (parked.leaf.parent === parked.tabs) {
+            this.releaseParked(parked);
+            return;
+          }
+          parked.tabs.containerEl.remove();
+          ws.setActiveLeaf(parked.leaf, { focus: true });
+          ws.requestSaveLayout?.();
+        }, 0), { once: true });
+        return;
+      }
+    }
+    this.imageDrag = { path: file.path, known, caption, until: 0 };
+  }
+  adoptDraggedImage() {
+    const drag = this.imageDrag;
+    if (!drag) return;
+    if (drag.until && Date.now() > drag.until) {
+      this.imageDrag = null;
+      return;
+    }
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      if (drag.known.has(leaf)) return;
+      drag.known.add(leaf);
+      if (leaf.view?.getViewType?.() === "image" && leaf.view.file?.path === drag.path) {
+        leaf.setViewState({ type: VIEW_IMAGE, state: { file: drag.path, figure: leaf.view.file.name, caption: drag.caption }, active: true });
+      }
+    });
+  }
+  onNoteImageClick(event) {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const img = this.noteImage(event.target);
+    if (!img) return;
+    stop(event);
+    this.openNoteImage(img);
+  }
+  // Phones: a plain tap opens the viewer without moving the editor's cursor or raising the
+  // keyboard. Embeds in a note that has galleries are already handled by startTouch, whose
+  // tap ends in a click (above).
+  noteImageTouchStart(event) {
+    this.imageTap = null;
+    if (event.touches.length !== 1 || this.touchTarget(event.target)) return;
+    const img = this.noteImage(event.target);
+    if (!img) return;
+    const p = event.touches[0];
+    this.imageTap = { img, id: p.identifier, x: p.clientX, y: p.clientY, at: Date.now() };
+  }
+  noteImageTouchEnd(event) {
+    const tap = this.imageTap;
+    this.imageTap = null;
+    if (!tap) return;
+    const p = [...event.changedTouches].find((touch) => touch.identifier === tap.id);
+    if (!p || event.touches.length || Math.hypot(p.clientX - tap.x, p.clientY - tap.y) > 10 || Date.now() - tap.at > 500) return;
+    stop(event);
+    this.openNoteImage(tap.img);
+  }
+  // Vault file behind an <img>: an embed's own link first, else its app:// resource path.
+  noteImageFile(img, sourcePath) {
+    const embed = img.closest(".internal-embed");
+    const src = embed?.getAttribute("src");
+    if (src) {
+      const file = this.imageFile("![[" + src + "]]", sourcePath);
+      if (file) return file;
+    }
+    const url = img.currentSrc || img.src || "";
+    if (!/^app:/i.test(url)) return null;
+    try {
+      let path = decodeURIComponent(new URL(url).pathname).replace(/^\/+/, "");
+      const base = String(this.app.vault.adapter?.basePath || "").replace(/\\/g, "/").replace(/\/+$/, "");
+      if (base && path.toLowerCase().startsWith(base.toLowerCase() + "/")) path = path.slice(base.length + 1);
+      const file = this.app.vault.getAbstractFileByPath(path);
+      return file && typeof file.extension === "string" ? file : null;
+    } catch (_) {
+      return null;
+    }
+  }
+  openNoteImage(img) {
+    let sourcePath = "";
+    const leafEl = img.closest(".workspace-leaf");
+    if (leafEl) this.app.workspace.iterateAllLeaves((leaf) => {
+      if (leaf.containerEl === leafEl) sourcePath = leaf.view?.file?.path || "";
+    });
+    if (!sourcePath) sourcePath = this.app.workspace.getActiveFile()?.path || "";
+    const file = this.noteImageFile(img, sourcePath);
+    const src = file ? this.app.vault.getResourcePath(file) : img.currentSrc || img.src;
+    if (!src) return;
+    let name = file?.name || "";
+    if (!name) {
+      try {
+        name = decodeURIComponent(new URL(src).pathname.split("/").pop() || "");
+      } catch (_) {
+      }
+    }
+    name = name || t("Image");
+    // Obsidian puts the link text in alt unless the embed gives its own; sizes like "300" or "300x200" aren't titles.
+    const alt = (img.getAttribute("alt") || "").trim(), tail = alt.split(/[\\/]/).pop();
+    const caption = alt && tail !== name && tail !== file?.basename && alt !== img.closest(".internal-embed")?.getAttribute("src") && !/^\d+(x\d+)?$/i.test(alt) ? alt : "";
+    const item = { id: "note-image", link: file ? "![[" + file.path + "]]" : src, src, file, name, caption };
+    const ui = { loose: true, root: img, sourcePath, block: { model: { id: "note-image", images: [item] } }, select() {} };
+    new OriginalImageModal(this, ui, item.id).open();
   }
   endNativeDrag(force = false) {
     if (this.nativeOrigin || force) {
@@ -2101,6 +2655,12 @@ var GalleryView = class extends Plugin {
     if (!this.scalable(file)) return null;
     const stamp = file.path + "|" + (file.stat?.mtime || 0) + "|" + (file.stat?.size || 0);
     let entry = this.scaled.get(stamp);
+    // A main image made for a smaller pane than the largest one seen now is made again at the new size.
+    if (entry && kind === "hero" && !entry.queued && entry.done && entry.heroSize < this.heroTarget()) {
+      this.scaled.delete(stamp);
+      for (const url of Object.values(entry.urls)) if (String(url).startsWith("blob:")) URL.revokeObjectURL(url);
+      entry = null;
+    }
     if (entry) {
       this.scaled.delete(stamp);
       if (priority && entry.queued) {
@@ -2157,9 +2717,134 @@ var GalleryView = class extends Plugin {
   // frame, the thumbnail from the hero; both are encoded as JPEG (WebP encoding
   // of a 2048 px frame costs ~300 ms, JPEG ~35 ms) unless the source may carry
   // alpha (png / webp / avif → WebP).
+  // Main-image size: the largest gallery picture box seen on this device, in device pixels, rounded up
+  // to 512 (1024 .. 4096). Remembered per device in localStorage (data.json syncs; screens differ).
+  heroTarget() {
+    if (!this.heroSize) {
+      let saved = 0;
+      try {
+        saved = Number(window.localStorage.getItem("paipa-gallery-hero-size")) || 0;
+      } catch (_) {
+      }
+      this.heroSize = saved >= 1024 ? Math.min(4096, saved) : GalleryView.SCALED.hero;
+    }
+    return this.heroSize;
+  }
+  noteHeroBox(el) {
+    const r = el.getBoundingClientRect(), dpr = el.ownerDocument.defaultView?.devicePixelRatio || 1;
+    if (!r.width || !r.height) return;
+    const need = Math.min(4096, Math.max(1024, Math.ceil(Math.max(r.width, r.height) * dpr / 512) * 512));
+    if (need <= this.heroTarget()) return;
+    this.heroSize = need;
+    try {
+      window.localStorage.setItem("paipa-gallery-hero-size", String(need));
+    } catch (_) {
+    }
+  }
+  // Viewer and image tab: show the kept main image at once, then the original as soon as it is
+  // decoded. Until then the picture gets the size the original will have, so nothing moves.
+  progressiveSrc(owner, file, full) {
+    const img = owner.img;
+    img.style.width = img.style.height = img.style.background = "";
+    img.dataset.full = full;
+    const entry = file ? this.scaledEntry(file) : null, quick = entry?.urls?.hero;
+    if (!quick || !String(quick).startsWith("blob:") || !entry.full) {
+      img.src = full;
+      return;
+    }
+    if (!this.settings.fillViewer) {
+      const frame = owner.contentEl, [ow, oh] = entry.full;
+      const fit = Math.min(1, frame.clientWidth / ow, frame.clientHeight / oh);
+      if (fit > 0) {
+        img.style.width = Math.round(ow * fit) + "px";
+        img.style.height = Math.round(oh * fit) + "px";
+      }
+    }
+    img.src = quick;
+    const pre = new Image();
+    pre.src = full;
+    pre.decode().catch(() => {
+    }).then(() => {
+      if (owner.closed || img.dataset.full !== full) return;
+      // No flash: the preview stays painted as the element's own background (contain + centred, the
+      // same placement as object-fit: contain), so whatever frame the browser shows between the two
+      // sources is the preview, and the original paints straight over it. The backdrop is dropped two
+      // frames after the original has loaded, once it is surely on screen.
+      img.style.background = 'center / contain no-repeat url("' + quick + '")';
+      owner.keepZoom = true;
+      const win = img.ownerDocument.defaultView || window;
+      const done = () => {
+        img.removeEventListener("load", done);
+        img.removeEventListener("error", done);
+        win.requestAnimationFrame(() => win.requestAnimationFrame(() => {
+          if (img.dataset.full !== full) return;
+          img.style.background = "";
+          img.style.width = img.style.height = "";
+        }));
+      };
+      img.addEventListener("load", done);
+      img.addEventListener("error", done);
+      img.src = full;
+    });
+  }
+  // Tab drag for an image: Obsidian's own workspace.onDragLeaf needs a real leaf with a parent (the
+  // drop calls leaf.parent.removeChild) and a size (dragging out of the window opens a window that
+  // size). The leaf shows the image tab and waits in a tab group parked off-screen until the drop
+  // moves it into the workspace; if the drag ends anywhere else it is thrown away.
+  tabsClass() {
+    if (obsidian.WorkspaceTabs) return obsidian.WorkspaceTabs;
+    let found = null;
+    this.app.workspace.iterateRootLeaves((leaf) => {
+      if (!found && leaf.parent?.type === "tabs") found = leaf.parent.constructor;
+    });
+    return found;
+  }
+  parkImageLeaf(doc, box, state) {
+    const Tabs = this.tabsClass(), Leaf = obsidian.WorkspaceLeaf;
+    if (!Tabs || !Leaf || !state) return null;
+    let tabs = null;
+    try {
+      tabs = new Tabs(this.app.workspace);
+      const leaf = new Leaf(this.app);
+      Object.assign(tabs.containerEl.style, { position: "fixed", left: "-100000px", top: "0", width: Math.round(box.width || 800) + "px", height: Math.round(box.height || 600) + "px", pointerEvents: "none" });
+      doc.body.appendChild(tabs.containerEl);
+      tabs.insertChild(0, leaf);
+      leaf.setViewState({ type: VIEW_IMAGE, state }).catch(() => {
+      });
+      return { tabs, leaf, path: state.file };
+    } catch (error) {
+      console.error(error);
+      tabs?.containerEl.remove();
+      return null;
+    }
+  }
+  releaseParked(parked) {
+    if (!parked) return;
+    try {
+      if (parked.leaf.parent === parked.tabs) parked.leaf.detach();
+    } catch (_) {
+    }
+    parked.tabs.containerEl.remove();
+  }
+  scaledEntry(file) {
+    if (!this.scalable(file)) return null;
+    return this.scaled.get(file.path + "|" + (file.stat?.mtime || 0) + "|" + (file.stat?.size || 0)) || null;
+  }
+  // Previews kept on this device (PreviewStore) are used when they are at least as large as needed;
+  // otherwise the original is decoded once and the result is kept for next time.
   async decodeScaled(file, entry) {
+    const key = file.path + "|" + (file.stat?.mtime || 0) + "|" + (file.stat?.size || 0);
+    const saved = await this.previews.get(key);
+    const HERO = this.heroTarget(), THUMB = GalleryView.SCALED.thumb, resource = this.app.vault.getResourcePath(file);
+    if (saved && (saved.heroOriginal || saved.heroSize >= HERO)) {
+      entry.urls.hero = saved.heroOriginal ? resource : URL.createObjectURL(saved.hero);
+      entry.urls.thumb = saved.thumbOriginal ? resource : URL.createObjectURL(saved.thumb);
+      entry.heroSize = saved.heroOriginal ? Infinity : saved.heroSize;
+      entry.full = saved.full;
+      entry.done = true;
+      return;
+    }
     const data = await this.app.vault.readBinary(file);
-    const { thumb: THUMB, hero: HERO } = GalleryView.SCALED;
     let source = null, original = null;
     if (/^jpe?g$/i.test(file.extension) && typeof ImageDecoder === "function") {
       original = jpegDimensions(data);
@@ -2188,29 +2873,43 @@ var GalleryView = class extends Plugin {
       if (scale >= 1) return bitmap;
       return createImageBitmap(bitmap, { resizeWidth: Math.max(1, Math.round(bitmap.width * scale)), resizeHeight: Math.max(1, Math.round(bitmap.height * scale)), resizeQuality: quality });
     };
-    let hero = source, thumb = null;
+    let hero = source, thumb = null, heroBlob = null, thumbBlob = null;
     try {
-      if (longest <= HERO) entry.urls.hero = this.app.vault.getResourcePath(file);
+      if (longest <= HERO) entry.urls.hero = resource;
       else {
         hero = await fit(source, HERO, "medium");
-        entry.urls.hero = await this.encodeBitmap(hero, type);
+        heroBlob = await this.encodeBitmap(hero, type);
+        entry.urls.hero = URL.createObjectURL(heroBlob);
       }
-      if (longest <= THUMB) entry.urls.thumb = this.app.vault.getResourcePath(file);
+      if (longest <= THUMB) entry.urls.thumb = resource;
       else {
         thumb = await fit(hero, THUMB, "high");
-        entry.urls.thumb = await this.encodeBitmap(thumb, type);
+        thumbBlob = await this.encodeBitmap(thumb, type);
+        entry.urls.thumb = URL.createObjectURL(thumbBlob);
       }
     } finally {
       if (thumb && thumb !== hero) thumb.close();
       if (hero !== source) hero.close();
       source.close();
     }
+    entry.heroSize = heroBlob ? HERO : Infinity;
+    entry.full = original;
+    entry.done = true;
+    this.previews.put({
+      key,
+      hero: heroBlob,
+      thumb: thumbBlob,
+      heroOriginal: !heroBlob,
+      thumbOriginal: !thumbBlob,
+      heroSize: HERO,
+      full: original,
+      bytes: (heroBlob?.size || 0) + (thumbBlob?.size || 0)
+    });
   }
   async encodeBitmap(bitmap, type) {
     const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
     canvas.getContext("2d").drawImage(bitmap, 0, 0);
-    const blob = await canvas.convertToBlob({ type, quality: 0.86 });
-    return URL.createObjectURL(blob);
+    return canvas.convertToBlob({ type, quality: 0.86 });
   }
   trimScaled() {
     while (this.scaled.size > GalleryView.SCALED_CACHE) {
@@ -2417,7 +3116,8 @@ var GalleryView = class extends Plugin {
     }
     this.active.set(this.pathFor(cm) + ":" + galleryId, itemId);
     const ui = [...this.uis].find((entry) => entry.cm === cm && entry.block.model.id === galleryId && entry.root.isConnected);
-    if (!ui || !this.mostlyVisible(ui.frame, cm.scrollDOM)) cm.dispatch({ effects: EditorView.scrollIntoView(block.from, { y: "start", yMargin: 12 }) });
+    if (!ui) cm.dispatch({ effects: EditorView.scrollIntoView(block.from, { y: "center" }) });
+    else if (!this.inView(ui.frame, cm.scrollDOM)) ui.frame.scrollIntoView({ block: "center", behavior: "smooth" });
     ui?.select(itemId);
   }
   // Jump from a gallery's search box to a figure of the same note: the target
@@ -2432,7 +3132,7 @@ var GalleryView = class extends Plugin {
     else {
       const ui = target();
       if (ui) {
-        if (!this.mostlyVisible(ui.frame, container)) ui.frame.scrollIntoView({ block: "start", behavior: "smooth" });
+        if (!this.inView(ui.frame, container)) ui.frame.scrollIntoView({ block: "center", behavior: "smooth" });
       } else {
         let view = null;
         this.app.workspace.iterateAllLeaves((leaf) => {
@@ -2465,14 +3165,18 @@ var GalleryView = class extends Plugin {
       return;
     }
     const scroller = ui.root.closest(".markdown-preview-view") || ui.root.closest(".markdown-reading-view");
-    if (!scroller || !this.mostlyVisible(ui.frame, scroller)) ui.frame.scrollIntoView({ block: "start", behavior: "smooth" });
+    if (!scroller || !this.inView(ui.frame, scroller)) ui.frame.scrollIntoView({ block: "center", behavior: "smooth" });
     ui.select(itemId);
   }
-  mostlyVisible(el, scroller) {
+  // A gallery already on screen never moves: it counts as in view once half of it, or half of
+  // the pane for a gallery taller than the pane, is visible. Only one off screen is scrolled to,
+  // and then to the middle of the pane rather than the top.
+  inView(el, scroller) {
+    if (!scroller) return false;
     const r = el.getBoundingClientRect(), s = scroller.getBoundingClientRect();
     if (r.height <= 0) return false;
     const visible = Math.min(r.bottom, s.bottom) - Math.max(r.top, s.top);
-    return visible / r.height >= 0.9;
+    return visible >= Math.min(r.height, s.height) * 0.5;
   }
   refAt(text, pos) {
     return core.refMatches(text).find((ref) => ref.from === pos) || core.refMatches(text).find((ref) => pos >= ref.from && pos <= ref.to) || null;
@@ -2892,16 +3596,16 @@ var GalleryView = class extends Plugin {
       new Notice(t("Downscaled {n} of {total} images.", { n: done, total: files.size }));
     }).open();
   }
-  // Phones never re-encode images. With "Fit images to the viewer" on, an image added to a gallery
+  // Phones never re-encode images. With "Shrink large images when adding" on, an image added to a gallery
   // on a phone (dropped file or image moved in from the text) is marked `"resize": true` in the
   // gallery JSON instead; the next desktop that shows the gallery shrinks the file and clears the mark.
   markResize(model, before) {
-    if (!obsidian.Platform.isMobile || !this.settings.resizeImages) return model;
+    if (!obsidian.Platform.isMobile || !this.settings.shrinkOnAdd) return model;
     const old = new Set(before.images.map((item) => item.id));
     return { ...model, images: model.images.map((item) => old.has(item.id) || core.isVideo(item.link) ? item : { ...item, resize: true }) };
   }
   async resizePending(ui) {
-    if (obsidian.Platform.isMobile || !this.settings.resizeImages) return;
+    if (obsidian.Platform.isMobile || !this.settings.shrinkOnAdd) return;
     const items = ui.block.model.images.filter((item) => item.resize);
     if (!items.length) return;
     const key = ui.sourcePath + ":" + ui.block.model.id;
@@ -2986,7 +3690,7 @@ var GalleryView = class extends Plugin {
         if (!core.mediaExtension.test(file.name)) continue;
         const path = await this.attachmentPath(file.name, ui.sourcePath);
         let data = await file.arrayBuffer();
-        if (this.settings.resizeImages && !obsidian.Platform.isMobile) data = (await this.shrinkImage(data, file.name).catch(() => null))?.data || data;
+        if (this.settings.shrinkOnAdd && !obsidian.Platform.isMobile) data = (await this.shrinkImage(data, file.name).catch(() => null))?.data || data;
         const attachment = await this.app.vault.createBinary(path, data);
         links.push(this.app.fileManager.generateMarkdownLink(attachment, ui.sourcePath).replace(/^\[/, "!["));
       }
@@ -3246,12 +3950,46 @@ var GallerySettingTab = class extends PluginSettingTab {
       this.display();
       this.plugin.refreshLanguage();
     }));
+    new Setting(containerEl).setName(t("Gallery behaviour for note images")).setDesc(t("Images outside galleries behave like gallery images: click (tap on phones) opens the full-size viewer, the pointer shows a magnifier, and dragging an image works like dragging a tab. When off, note images behave exactly as in Obsidian.")).addToggle((toggle) => toggle.setValue(!!this.plugin.settings.noteImages).onChange(async (value) => {
+      this.plugin.settings.noteImages = value;
+      await this.plugin.saveSettings();
+      this.plugin.applyNoteImageClass();
+    }));
     const box = this.plugin.resizeBox();
-    new Setting(containerEl).setName(t("Fit images to the viewer")).setDesc(t("The full-size viewer fills its frame with every image, enlarging smaller ones; this applies to images already in galleries as soon as it is turned on. Large images dropped into a gallery are saved at the size the viewer needs on your largest screen (currently {long} × {short} px, long × short side), and only the smaller copy is stored. For large images already in a note, use the command \"Downscale images in this note's galleries\".", box)).addToggle((toggle) => toggle.setValue(!!this.plugin.settings.resizeImages).onChange(async (value) => {
-      this.plugin.settings.resizeImages = value;
+    new Setting(containerEl).setName(t("Fill the viewer frame")).setDesc(t("The full-size viewer fills its frame with every image, enlarging smaller ones. Display only: files are never changed.")).addToggle((toggle) => toggle.setValue(!!this.plugin.settings.fillViewer).onChange(async (value) => {
+      this.plugin.settings.fillViewer = value;
       await this.plugin.saveSettings();
       for (const modal of this.plugin.modals) modal.applyFit?.();
+      this.app.workspace.getLeavesOfType(VIEW_IMAGE).forEach((leaf) => leaf.view.applyFit?.());
     }));
+    new Setting(containerEl).setName(t("Shrink large images when adding")).setDesc(t("Replaces the files: large images dropped into a gallery are saved at the size the viewer needs on your largest screen (currently {long} × {short} px, long × short side), and only the smaller copy is kept. Images added on a phone are shrunk the next time the note is opened on a computer. Off by default, so galleries keep your originals.", box)).addToggle((toggle) => toggle.setValue(!!this.plugin.settings.shrinkOnAdd).onChange(async (value) => {
+      this.plugin.settings.shrinkOnAdd = value;
+      await this.plugin.saveSettings();
+    }));
+    const cache = new Setting(containerEl).setName(t("Keep previews on this device")).setDesc(t("Gallery thumbnails and main images are small copies made from your originals. Keeping them in this device's app storage (outside the vault, never synced) makes galleries load at once after a restart. Originals are never changed."));
+    cache.addToggle((toggle) => toggle.setValue(this.plugin.settings.previewCache !== false).onChange(async (value) => {
+      this.plugin.settings.previewCache = value;
+      await this.plugin.saveSettings();
+      this.display();
+    }));
+    if (this.plugin.settings.previewCache !== false) {
+      const limit = new Setting(containerEl).setName(t("Preview storage limit")).setDesc(t("Oldest previews are removed past this size. In use: {size}.", { size: "…" }));
+      limit.addDropdown((dropdown) => {
+        for (const mb of [250, 500, 1000, 2000]) dropdown.addOption(String(mb), mb >= 1000 ? mb / 1000 + " GB" : mb + " MB");
+        dropdown.setValue(String(this.plugin.settings.previewCacheMB || 500)).onChange(async (value) => {
+          this.plugin.settings.previewCacheMB = Number(value);
+          await this.plugin.saveSettings();
+          this.plugin.previews.trim();
+        });
+      });
+      limit.addButton((button) => button.setButtonText(t("Clear")).onClick(async () => {
+        await this.plugin.previews.clear();
+        this.display();
+      }));
+      this.plugin.previews.usage().then((bytes) => {
+        limit.setDesc(t("Oldest previews are removed past this size. In use: {size}.", { size: (bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0) + " MB" }));
+      });
+    }
     // Developer-mode settings are no longer shown. The stored devMode / refOffset values are kept and still apply.
     if (!GallerySettingTab.SHOW_DEV_SETTINGS) return;
     new Setting(containerEl).setName(t("Developer mode")).setDesc(t("Show fine-tuning controls.")).addToggle((toggle) => toggle.setValue(this.plugin.settings.devMode).onChange(async (value) => {

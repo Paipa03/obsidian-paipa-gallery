@@ -155,7 +155,33 @@ body.is-mobile .modal-container.gv-modal-container.is-phone-viewer .modal-header
 .gv-modal .modal-content.is-panning { cursor: grabbing; }
 /* "Fit images to the viewer" on: smaller images are enlarged to fill the frame. */
 .gv-modal.is-fit .gv-original { width: 100%; height: 100%; }
-.gv-modal .modal-close-button { z-index: 1; }
+.gv-modal .modal-close-button { z-index: 2; }
+/* Drag bar (1.9.0, desktop): the viewer's top padding strip, full width, works like a tab header.
+   At rest only a short grip shows; on hover the strip lights up and the grip widens. */
+/* The bar is an inset rounded strip that ends 52px before the right edge, leaving the close
+   button its own corner; hovering ✕ no longer lights the bar. */
+.gv-original-bar { position: absolute; top: 4px; left: 8px; right: 52px; z-index: 1; height: 28px; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: grab; border-radius: var(--radius-m, 8px); transition: background-color .14s; -webkit-user-drag: element; }
+.gv-original-bar:hover { background: var(--background-modifier-hover); }
+.gv-original-bar:active { cursor: grabbing; }
+.gv-original-bar[hidden] { display: none; }
+.gv-original-grip { flex: 0 0 auto; width: 32px; height: 4px; border-radius: 2px; background: var(--background-modifier-border-hover, var(--background-modifier-border)); pointer-events: none; transition: width .18s cubic-bezier(.2, .8, .2, 1), background-color .14s; }
+.gv-original-bar:hover .gv-original-grip { width: 52px; background: var(--text-faint); }
+body.is-grabbing .gv-original-bar { background: var(--background-modifier-active-hover, var(--background-modifier-hover)); }
+/* Delayed hint (added by script after ~1.2 s of rest, never while pressed or dragging). Absolutely placed
+   so the grip stays centred whether or not it shows. */
+.gv-original-bar-hint { position: absolute; left: calc(50% + 38px); max-width: calc(50% - 46px); font-size: var(--font-ui-smaller); color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; opacity: 0; transform: translateX(-4px); transition: opacity .2s ease, transform .2s ease; }
+.gv-original-bar.show-hint .gv-original-bar-hint { opacity: 1; transform: none; }
+body.is-grabbing .gv-original-bar-hint { opacity: 0; }
+
+/* Image tab (1.9.0): an image dragged out of the viewer or out of a note, shown like the viewer, with its zoom. */
+.workspace-leaf-content.gv-image-view { background: var(--background-primary); }
+.gv-image-view > .view-content.gv-image-frame { position: relative; flex: 1 1 auto; min-height: 0; margin: 16px 16px 0; padding: 0; overflow: hidden; display: flex; justify-content: center; align-items: center; touch-action: none; background: transparent; }
+.gv-image-view > .gv-original-caption { margin: 0 16px 12px; }
+.gv-image-view.is-fit .gv-original { width: 100%; height: 100%; }
+.gv-image-frame.is-zoomed { cursor: grab; }
+.gv-image-frame.is-panning { cursor: grabbing; }
+/* Note images open in the viewer when clicked (setting on, desktop). */
+body.gv-note-images :is(.markdown-preview-view, .markdown-rendered, .cm-content) img:not(.cm-widgetBuffer, a img, .gv-block img, .wb-card img, .canvas-node img, .modal img) { cursor: zoom-in; }
 .gv-original-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 1; display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0; border: none; border-radius: 50%; background: rgba(0, 0, 0, .38); color: #fff; box-shadow: none; cursor: pointer; opacity: .75; transition: opacity .15s, background .15s; }
 .gv-original-nav.is-prev { left: 10px; }
 .gv-original-nav.is-next { right: 10px; }
