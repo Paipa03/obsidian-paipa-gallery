@@ -1,5 +1,5 @@
 /*
- * Paipa Gallery 2.0.0 - by paipa, MIT License
+ * Paipa Gallery 2.0.1 - by paipa, MIT License
  * https://github.com/Paipa03/obsidian-paipa-gallery
  *
  * UI inspired by the Lite Gallery plugin.
@@ -15,8 +15,6 @@ var PAIPA_I18N_ZH = {
   "Images outside galleries behave like gallery images: click (tap on phones) opens the full-size viewer, the pointer shows a magnifier, and dragging an image works like dragging a tab. When off, note images behave exactly as in Obsidian.": "让 Gallery 之外的图片也用 Gallery 的交互：点击（手机上轻点）打开原图窗口，鼠标悬停显示放大镜，拖动图片像拖标签页一样。关闭时，笔记图片完全按 Obsidian 原本的方式工作。",
   "Fill the viewer frame": "原图窗口铺满画框",
   "The full-size viewer fills its frame with every image, enlarging smaller ones. Display only: files are never changed.": "原图窗口里每张图都铺满画框，较小的图会被放大。只影响显示，从不改动文件。",
-  "Shrink large images when adding": "加图时缩小大图",
-  "Replaces the files: large images dropped into a gallery are saved at the size the viewer needs on your largest screen (currently {long} × {short} px, long × short side), and only the smaller copy is kept. Images added on a phone are shrunk the next time the note is opened on a computer. Off by default, so galleries keep your originals.": "会替换文件：拖进 Gallery 的大图按原图窗口在你最大的屏幕上所需的尺寸保存（当前为 {long} × {short} px，长边 × 短边），只保留缩小后的版本；手机上加的图在下次用电脑打开该笔记时缩小。默认关闭，Gallery 保留你的原图。",
   "Keep previews on this device": "在本机保留预览图",
   "Gallery thumbnails and main images are small copies made from your originals. Keeping them in this device's app storage (outside the vault, never synced) makes galleries load at once after a restart. Originals are never changed.": "Gallery 的缩略图和主图是从原图缩出来的小副本。把它们存在本机的应用存储里（在库外、不会被任何同步方案同步），重启后 Gallery 也能立刻显示。原图从不改动。",
   "Preview storage limit": "预览图占用上限",
@@ -314,7 +312,7 @@ var require_core = __commonJS({
 // plugin.js
 var obsidian = require("obsidian");
 var { Plugin, MarkdownRenderChild, Menu, Modal, Notice, setIcon, editorInfoField, editorLivePreviewField, PluginSettingTab, Setting } = obsidian;
-var DEFAULT_SETTINGS = { devMode: false, refOffset: -2, language: "auto", fillViewer: false, shrinkOnAdd: false, screenBox: null, noteImages: false, previewCache: true, previewCacheMB: 500 };
+var DEFAULT_SETTINGS = { devMode: false, refOffset: -2, language: "auto", fillViewer: false, screenBox: null, noteImages: false, previewCache: true, previewCacheMB: 500 };
 var { EditorState, StateField, StateEffect, Annotation, Transaction, Prec, ChangeSet } = require("@codemirror/state");
 var { EditorView, WidgetType, Decoration } = require("@codemirror/view");
 var core = require_core();
@@ -1811,7 +1809,6 @@ var GalleryUI = class {
     return this.sourcePath + ":" + this.block.model.id;
   }
   render() {
-    this.plugin.resizePending(this);
     const scroll = this.strip.scrollLeft;
     this.strip.replaceChildren();
     for (const item of this.block.model.images) {
@@ -2104,16 +2101,17 @@ var GalleryView = class extends Plugin {
   async onload() {
     const stored = await this.loadData() || {};
     this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
-    // 1.9.0 split "Fit images to the viewer" (resizeImages) into display (fillViewer) and file
-    // shrinking (shrinkOnAdd). Display carries over; shrinking starts off, so originals are kept.
+    // "Fit images to the viewer" (resizeImages) became the display-only fillViewer. Shrinking files
+    // on add (shrinkOnAdd) is gone: galleries never change the originals.
     // Pre-release builds of 1.9.0 stored openNoteImages (on by default); the option is now noteImages, off by default.
     if ("openNoteImages" in stored) {
       delete this.settings.openNoteImages;
       await this.saveData(this.settings);
     }
-    if ("resizeImages" in stored) {
-      if (!("fillViewer" in stored)) this.settings.fillViewer = !!stored.resizeImages;
+    if ("resizeImages" in stored || "shrinkOnAdd" in stored) {
+      if ("resizeImages" in stored && !("fillViewer" in stored)) this.settings.fillViewer = !!stored.resizeImages;
       delete this.settings.resizeImages;
+      delete this.settings.shrinkOnAdd;
       await this.saveData(this.settings);
     }
     this.previews = new PreviewStore(this);
@@ -3498,7 +3496,7 @@ var GalleryView = class extends Plugin {
     this.commit(cm, [...this.takeOut(snapshot, images), {
       from: block.from,
       to: block.to,
-      insert: core.serialize(this.markResize(core.insert(block.model, images.map((i) => i.link), index), block.model), block.indent)
+      insert: core.serialize(core.insert(block.model, images.map((i) => i.link), index), block.indent)
     }], "move-in");
     return true;
   }
@@ -3596,60 +3594,6 @@ var GalleryView = class extends Plugin {
       new Notice(t("Downscaled {n} of {total} images.", { n: done, total: files.size }));
     }).open();
   }
-  // Phones never re-encode images. With "Shrink large images when adding" on, an image added to a gallery
-  // on a phone (dropped file or image moved in from the text) is marked `"resize": true` in the
-  // gallery JSON instead; the next desktop that shows the gallery shrinks the file and clears the mark.
-  markResize(model, before) {
-    if (!obsidian.Platform.isMobile || !this.settings.shrinkOnAdd) return model;
-    const old = new Set(before.images.map((item) => item.id));
-    return { ...model, images: model.images.map((item) => old.has(item.id) || core.isVideo(item.link) ? item : { ...item, resize: true }) };
-  }
-  async resizePending(ui) {
-    if (obsidian.Platform.isMobile || !this.settings.shrinkOnAdd) return;
-    const items = ui.block.model.images.filter((item) => item.resize);
-    if (!items.length) return;
-    const key = ui.sourcePath + ":" + ui.block.model.id;
-    this.resizing ??= /* @__PURE__ */ new Set();
-    if (this.resizing.has(key)) return;
-    this.resizing.add(key);
-    try {
-      const done = /* @__PURE__ */ new Set();
-      for (const item of items) {
-        const file = this.imageFile(item.link, ui.sourcePath);
-        if (!file) continue; // not synced to this device yet: keep the mark for later
-        try {
-          const result = await this.shrinkImage(await this.app.vault.readBinary(file), file.name);
-          if (result) await this.app.vault.modifyBinary(file, result.data);
-        } catch (error) {
-          console.error("Paipa Gallery:", file.path, error);
-        }
-        done.add(item.id);
-      }
-      if (done.size) await this.clearResizeMarks(ui, done);
-    } finally {
-      this.resizing.delete(key);
-    }
-  }
-  async clearResizeMarks(ui, ids) {
-    const strip = (model) => ({ ...model, images: model.images.map((item) => {
-      if (!ids.has(item.id)) return item;
-      const { resize, ...rest } = item;
-      return rest;
-    }) });
-    const block = ui.cm && ui.root.isConnected ? this.blockFor(ui) : null;
-    if (block) {
-      this.commit(ui.cm, { from: block.from, to: block.to, insert: core.serialize(strip(block.model), block.indent) }, "resize", false);
-      return;
-    }
-    const file = this.app.vault.getAbstractFileByPath(ui.sourcePath);
-    if (!file || typeof file.extension !== "string") return;
-    await this.app.vault.process(file, (text) => {
-      const found = core.scan(text).filter((b) => b.model.id === ui.block.model.id);
-      if (found.length !== 1) return text;
-      const b = found[0];
-      return text.slice(0, b.from) + core.serialize(strip(b.model), b.indent) + text.slice(b.to);
-    });
-  }
   // Where a file dropped into a gallery is created. Section Blocks (if installed
   // and its "Organize media" is on) answers with the note's "<note> media"
   // folder; otherwise Obsidian's own attachment setting decides.
@@ -3689,9 +3633,7 @@ var GalleryView = class extends Plugin {
       if (!links.length) for (const file of Array.from(event.dataTransfer.files)) {
         if (!core.mediaExtension.test(file.name)) continue;
         const path = await this.attachmentPath(file.name, ui.sourcePath);
-        let data = await file.arrayBuffer();
-        if (this.settings.shrinkOnAdd && !obsidian.Platform.isMobile) data = (await this.shrinkImage(data, file.name).catch(() => null))?.data || data;
-        const attachment = await this.app.vault.createBinary(path, data);
+        const attachment = await this.app.vault.createBinary(path, await file.arrayBuffer());
         links.push(this.app.fileManager.generateMarkdownLink(attachment, ui.sourcePath).replace(/^\[/, "!["));
       }
     }
@@ -3702,7 +3644,7 @@ var GalleryView = class extends Plugin {
     }
     const block = this.blockFor(ui);
     if (!block) return;
-    const changes = [{ from: block.from, to: block.to, insert: core.serialize(this.markResize(core.insert(block.model, links, index), block.model), block.indent) }];
+    const changes = [{ from: block.from, to: block.to, insert: core.serialize(core.insert(block.model, links, index), block.indent) }];
     if (origin) changes.push(...this.takeOut(snapshot, origin.images));
     this.commit(ui.cm, changes, "drop");
   }
@@ -3836,7 +3778,7 @@ var GalleryView = class extends Plugin {
         if (!block) return;
         this.commit(cm, [
           ...this.takeOut(snapshot, origin.images),
-          { from: block.from, to: block.to, insert: core.serialize(this.markResize(core.insert(block.model, origin.images.map((i) => i.link), index), block.model), block.indent) }
+          { from: block.from, to: block.to, insert: core.serialize(core.insert(block.model, origin.images.map((i) => i.link), index), block.indent) }
         ], "touch-in");
         return;
       }
@@ -3955,16 +3897,11 @@ var GallerySettingTab = class extends PluginSettingTab {
       await this.plugin.saveSettings();
       this.plugin.applyNoteImageClass();
     }));
-    const box = this.plugin.resizeBox();
     new Setting(containerEl).setName(t("Fill the viewer frame")).setDesc(t("The full-size viewer fills its frame with every image, enlarging smaller ones. Display only: files are never changed.")).addToggle((toggle) => toggle.setValue(!!this.plugin.settings.fillViewer).onChange(async (value) => {
       this.plugin.settings.fillViewer = value;
       await this.plugin.saveSettings();
       for (const modal of this.plugin.modals) modal.applyFit?.();
       this.app.workspace.getLeavesOfType(VIEW_IMAGE).forEach((leaf) => leaf.view.applyFit?.());
-    }));
-    new Setting(containerEl).setName(t("Shrink large images when adding")).setDesc(t("Replaces the files: large images dropped into a gallery are saved at the size the viewer needs on your largest screen (currently {long} × {short} px, long × short side), and only the smaller copy is kept. Images added on a phone are shrunk the next time the note is opened on a computer. Off by default, so galleries keep your originals.", box)).addToggle((toggle) => toggle.setValue(!!this.plugin.settings.shrinkOnAdd).onChange(async (value) => {
-      this.plugin.settings.shrinkOnAdd = value;
-      await this.plugin.saveSettings();
     }));
     const cache = new Setting(containerEl).setName(t("Keep previews on this device")).setDesc(t("Gallery thumbnails and main images are small copies made from your originals. Keeping them in this device's app storage (outside the vault, never synced) makes galleries load at once after a restart. Originals are never changed."));
     cache.addToggle((toggle) => toggle.setValue(this.plugin.settings.previewCache !== false).onChange(async (value) => {

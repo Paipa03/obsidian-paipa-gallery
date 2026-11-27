@@ -32,7 +32,6 @@ Coming from Lite Gallery? Put the cursor in a `litegal` block and run **Convert 
 |---|---|
 | **Gallery behaviour for note images** (off by default) | Images outside galleries open in the same viewer when clicked (tap on phones), show a magnifier pointer, and drag like a tab. When off, they behave exactly as in Obsidian. |
 | **Fill the viewer frame** (off by default) | The full-size viewer fills its frame with every image, enlarging small ones. Display only. |
-| **Shrink large images when adding** (off by default) | Replaces files: large images dropped into a gallery are saved at the size the viewer needs on your largest screen, and only the smaller copy is kept. |
 | **Keep previews on this device** (on by default) | Where thumbnails and previews are kept (outside the vault, never synced), with a size limit and a Clear button. |
 | **Language** | Follow Obsidian, English or 中文. |
 
@@ -93,7 +92,6 @@ Desktop, iPhone / iPad and Android. On touch screens: tap a thumbnail to select,
 |---|---|
 | **笔记图片使用 Gallery 交互**（默认关） | 图集外的普通图片点击（手机轻点）后用同一个原图窗口打开，鼠标悬停显示放大镜，可像标签页一样拖动。关闭时完全按 Obsidian 原本的方式。 |
 | **原图窗口铺满画框**（默认关） | 原图窗口里每张图都铺满画框，小图会被放大。只影响显示。 |
-| **加图时缩小大图**（默认关） | 会替换文件：拖进图集的大图按你最大屏幕所需的尺寸保存，只留缩小后的那份。 |
 | **在本机保留预览图**（默认开） | 缩略图和预览存放的位置（库外，不会被同步），可设大小上限，也可一键清空。 |
 | **语言** | 跟随 Obsidian、English 或中文。 |
 

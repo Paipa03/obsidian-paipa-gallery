@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.1
+
+- **Originals are always kept**: the setting "Shrink large images when adding" is gone. Images dropped into a gallery, on any device, are saved exactly as they are. To shrink images already in a note, run the command **Downscale images in this note's galleries** (asks first, overwrites the files).
+
 ## 2.0.0
 
 - **Galleries stay put**: jumping to a search result, picking a thumbnail, paging or following a figure reference no longer scrolls a gallery that is already on screen. A gallery off screen is scrolled to the middle of the pane instead of the top. Opening the search box or editing a title no longer scrolls the note.
