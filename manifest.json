@@ -3,7 +3,7 @@
   "name": "Paipa Gallery",
   "version": "2.0.0",
   "minAppVersion": "1.5.0",
-  "description": "Many images and videos in one swipeable block: drag to reorder, numbered figures with captions, figure references, and a zoomable full-size viewer with swipe and pinch on phones.",
+  "description": "Image galleries that make pictures easy: tidy swipeable blocks, caption search, figure references in your text, a zoomable full-size viewer, and previews kept outside the vault so sync stays clean.",
   "author": "paipa",
   "authorUrl": "https://github.com/Paipa03",
   "isDesktopOnly": false
